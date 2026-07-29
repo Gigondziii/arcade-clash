@@ -8,8 +8,14 @@ conversations don't carry over, and work may resume from a different tool.
 Hub of short (60–180s) head-to-head arcade mini-games. Solo practice, or
 matched play (for-fun / for-stakes with play-money escrow; real-money hooks
 stubbed only, not wired up). React frontend, Node/Express + Socket.IO
-backend, Postgres via Drizzle ORM. Dark neon design system (near-black bg,
-cyan/magenta/purple glow accents) shared by every game module.
+backend, Postgres via Drizzle ORM.
+
+**Visual theme (as of session 2, replaces the original neon-rainbow theme):**
+cinematic dark UI — near-black bg (`#0a0a0f`), violet primary accent
+(`#7c3aed`, buttons/logo/active states), gold/amber secondary accent
+(`#fbbf24`, ratings + links only, never primary buttons), consistently
+rounded/pill-shaped controls, restrained single-color glow instead of
+multi-color neon borders. Shared by every game module via `packages/theme`.
 
 Full 51-game design doc lives outside this repo — the user feeds one game
 spec at a time, starting with one representative game per engine (Runner,
@@ -38,14 +44,17 @@ arcadeclash/
 │   ├── client/                # Vite + React + TS app
 │   │   └── src/
 │   │       ├── main.tsx       # imports @arcadeclash/theme/theme.css once, globally
-│   │       ├── App.tsx        # currently just renders ThemePreview
-│   │       └── pages/ThemePreview.tsx
+│   │       ├── App.tsx        # renders HomePage
+│   │       ├── lib/format.ts  # formatPlays(), engineLabel() display helpers
+│   │       ├── mock/homeData.ts   # PLACEHOLDER data — see "Decisions" below
+│   │       ├── components/    # Navbar, Hero, TrendingArena, GameCard, StarRating, icons
+│   │       └── pages/HomePage.tsx
 │   ├── server/                 # PLACEHOLDER — package.json + empty src/index.ts, no deps yet
 │   ├── shared/                 # PLACEHOLDER — package.json + empty src/index.ts, no types yet
 │   └── theme/                  # design system package — see below
 │       └── src/
 │           ├── theme.css       # :root CSS custom properties + .ac-* base classes
-│           ├── tokens.ts       # colors object + getThemeColor() for canvas/WebGL games
+│           ├── tokens.ts       # colors/categoryColors objects + getThemeColor()
 │           └── index.ts
 └── games/
     ├── package.json            # @arcadeclash/games workspace package
@@ -53,96 +62,157 @@ arcadeclash/
     └── <game-name>/             # (none yet — this is where each future game lives)
 ```
 
-## What was built this session (2026-07-29, session 1)
+## What was built
+
+### Session 1 (2026-07-29) — scaffold + original neon theme
 
 1. Git initialized, repo-local identity set (`abuseridzerati@gmail.com` /
    "ArcadeClash Dev" — user didn't specify one when asked, changeable via
    `git config user.name`/`user.email`).
 2. `.gitignore` + npm workspace root `package.json`.
 3. Client scaffolded via `npm create vite@latest -- --template react-ts`,
-   renamed to `@arcadeclash/client`, Vite boilerplate (demo App.tsx/CSS,
-   sample assets) stripped out.
-4. `packages/server`, `packages/shared` created as empty placeholders
-   (package.json + stub `src/index.ts` only — no auth/API/DB code yet).
+   renamed to `@arcadeclash/client`, Vite boilerplate stripped out.
+4. `packages/server`, `packages/shared` created as empty placeholders (still
+   true as of session 2 — no auth/API/DB code yet).
 5. `games/registry.ts` created with the `GameEngine` union type (the 8
    engines) and typed, empty `gameRegistry` array.
-6. **Design system built** (`packages/theme`): CSS custom properties for
-   color (surfaces, cyan/magenta/purple accents, semantic success/danger/
-   warning, text), typography (font stacks, size scale xs→4xl, weights,
-   line-heights), spacing (4px-based scale), radius, and layered glow
-   box-shadows per accent color. Plus a handful of reusable base classes
-   (`.ac-panel`, `.ac-border--{cyan,magenta,purple}`, `.ac-btn` + variants)
-   so components/games style via classes instead of repeating raw values.
-   `tokens.ts` mirrors the hex values for canvas/WebGL-based games that
-   can't use CSS vars directly, plus a `getThemeColor()` helper that reads
-   the live computed value from `:root`.
-7. Theme wired into the client: `main.tsx` imports `theme.css` once at the
-   app root; a `ThemePreview` page renders every color swatch, the type
-   scale, three glow panels (styled as Practice/For Fun/For Stakes cards),
-   and the three button variants.
-8. Verified working: `npm install` resolved the workspace symlink
-   (`@arcadeclash/theme` hoisted to root `node_modules`), Vite dev server
-   served the theme package's CSS/TS straight from source
-   (`/@fs/.../packages/theme/src/theme.css` → 200), and computed styles in
-   the browser confirmed the tokens actually apply (body background
-   `#05060a`, cyan panel border + glow shadow matching `--glow-cyan`
-   exactly). Screenshot tool couldn't render in this sandbox, so
-   verification was via computed-style inspection + page text + network
-   log instead of a visual screenshot — user should eyeball
-   `http://localhost:5173` themselves to sanity-check the look.
-9. Four commits made at logical checkpoints (see `git log`): empty scaffold
-   → folder structure → theme package → theme wired into client.
+6. First pass of the design system + a `ThemePreview` page to sanity-check
+   it. **Superseded in session 2** — see below. `ThemePreview.tsx` was
+   deleted; if you're looking for it, it's gone on purpose.
+
+### Session 2 (2026-07-29) — visual redesign + real homepage
+
+User provided a reference design (a Stitch mockup called "GameVault") and
+asked to replace the neon-rainbow theme with a more restrained cinematic
+dark UI, then rebuild the homepage to match its layout. Scope was
+explicitly **homepage only** — inner pages (game detail, matchmaking,
+wallet, etc.) don't exist yet, so there was nothing to propagate to yet.
+
+1. **`packages/theme` rewritten**: dropped the cyan/magenta/purple triple
+   accent + rainbow glow system entirely (confirmed nothing else referenced
+   it before deleting). New tokens: `--color-primary` (violet `#7c3aed`,
+   + hover/active shades), `--color-secondary` (gold `#fbbf24`, + hover/
+   active shades, used only for star ratings and secondary links per the
+   user's explicit instruction), bg/surface near-black scale, radius scale
+   bumped toward pill shapes (`--radius-full` for buttons/pills/search),
+   and a per-engine `--category-*` color palette (one hue per of the 8
+   engines, for game category tag pills — see decisions below).
+   `.ac-btn` is pill-shaped by default now; `.ac-pill` (nav/filter tags),
+   `.ac-tag` (category badges, parameterized by a `--tag-color` custom
+   property instead of one class per category), `.ac-card` (hover-elevate
+   game tiles), `.ac-search` (pill search input), and `.ac-link--secondary`
+   (gold links) are new. `tokens.ts` mirrors the new hex values + exports
+   `categoryColors`.
+2. **New homepage built** (`packages/client/src/pages/HomePage.tsx`):
+   - `Navbar` — violet wordmark, pill search input, filter pills (All +
+     4 sample engine categories + a "Hot" pill defaulted active), bell icon
+     + avatar placeholder circle. Filter clicks only toggle local visual
+     state right now — no actual filtering logic wired up.
+   - `Hero` — full-bleed rounded banner, **CSS-gradient placeholder**
+     standing in for real per-game key art (none exists yet), dark overlay
+     gradient for legibility, a "LIVE ARENA · N players online now" badge
+     top-right, category tag + "FEATURED GAME OF THE WEEK" + title +
+     description + solid violet "PLAY NOW" pill bottom-left.
+   - `TrendingArena` — trending icon + heading, gold "View Leaderboards →"
+     link (currently a dead `href="#"`, no leaderboard page exists yet),
+     responsive grid of `GameCard`s.
+   - `GameCard` — gradient thumbnail placeholder tinted by category color,
+     category tag pill overlaid top-left, title, star rating (gold filled
+     stars via `StarRating`), formatted play count.
+3. Verified in-browser: `npm install` linked the new `@arcadeclash/games`
+   dependency in `packages/client` (needed for the `GameEngine` type), Vite
+   served every new module with 200/304s and zero console errors, and
+   computed styles confirmed the design tokens applied exactly as specified
+   (`body` background `rgb(10,10,15)` = `#0a0a0f`; primary button background
+   `rgb(124,58,237)` = `#7c3aed`; button border-radius `9999px`; star fill
+   counts matched each mock rating's rounded value; `.ac-tag` background
+   resolved through `color-mix()` to the right translucent category tint).
+   As in session 1, the screenshot tool couldn't render in this sandbox —
+   verification was computed-style/DOM inspection + network log, not an
+   actual visual screenshot. **User should check `http://localhost:5173`
+   themselves before this direction is treated as confirmed.**
+4. Two commits: theme rewrite, then homepage build (on top of session 1's
+   four checkpoint commits — six total, see `git log --oneline`).
 
 ## Decisions / tradeoffs (read before changing structure)
 
-- **Theme is its own package (`packages/theme`), not `packages/client/src/theme`
-  as originally sketched in the pre-scaffold proposal.** Reason: game
-  modules under `/games/<name>/` need the theme too, and they must not
-  depend on `packages/client` (client's game-loader will depend on
-  `games/registry.ts`, so the reverse dependency would be circular).
-  Because CSS custom properties cascade from `:root`, a game mounted inside
-  the client's DOM tree gets the theme for free without importing anything;
-  `@arcadeclash/theme`'s plain-TS `colors`/`getThemeColor()` export covers
-  the canvas/WebGL case where a game needs an actual color value instead of
-  a `var(--x)` string.
-- **No light theme / theme toggle.** The brief describes one fixed dark
-  neon aesthetic, not a user-switchable theme, so `theme.css` only defines
-  one mode.
-- **No custom display font yet** — using the system font stack to stay
-  dependency-free. If the user wants a more distinctive arcade/pixel feel
-  (e.g. a Google Font), that's an open follow-up, not yet decided.
-- **`packages/server` and `packages/shared` are empty placeholders** — just
-  enough for the workspace to resolve them. No Express/Socket.IO/Drizzle/pg
-  dependencies added yet; deliberately deferred until server work actually
-  starts (next session), to keep this session's `npm install` lean.
+- **Theme is its own package (`packages/theme`), not `packages/client/src/theme`.**
+  Reason: game modules under `/games/<name>/` need the theme too, and they
+  must not depend on `packages/client` (client's future game-loader will
+  depend on `games/registry.ts`, so the reverse dependency would be
+  circular). CSS custom properties cascade from `:root`, so a game mounted
+  inside the client's DOM tree gets the theme for free without importing
+  anything; `@arcadeclash/theme`'s plain-TS `colors`/`categoryColors`/
+  `getThemeColor()` exports cover the canvas/WebGL case where a game needs
+  an actual color value instead of a `var(--x)` string.
+- **Category color palette duplicated in `packages/theme/src/tokens.ts`
+  (`categoryColors`) rather than importing `GameEngine` from
+  `@arcadeclash/games`.** Keeps `theme` dependency-free of `games` (theme
+  should be usable by anything, games included). The string keys must stay
+  in sync with the `GameEngine` union in `games/registry.ts` by hand — a
+  short comment in `tokens.ts` flags this. `packages/client` *does* now
+  depend on `@arcadeclash/games` directly (for the `GameEngine` type used
+  in mock data/components) — that's fine, not circular, since `games`
+  doesn't depend on `client`.
+- **Homepage content is entirely mock/placeholder data**
+  (`packages/client/src/mock/homeData.ts`): six invented trending games,
+  one invented featured game, a static `liveArenaCount = 128`. None of
+  auth, the game registry, matchmaking, or leaderboards exist yet to source
+  real data from — this was a visual/layout pass against the reference
+  design, not a functional integration. Replace this file's contents with
+  real API/websocket data once those systems exist; the component props
+  (`GameCard`, `Hero`, etc.) are already shaped generically enough to accept
+  real data without changing their internals.
+- **Hero background is a CSS gradient, not an image.** No per-game key art
+  exists yet and pulling a stock/placeholder photo felt riskier (licensing,
+  external dependency) than a gradient that already fits the "cinematic
+  dark" brief. Swap in real artwork per game once it exists.
+- **Nav filter pills and "View Leaderboards" link are presentational only**
+  — no client-side routing, no real filtering, no leaderboard page to link
+  to yet. Don't mistake the "Hot" pill's default-active styling for real
+  state; it's just a visual demo of the active-pill treatment.
+- **No light theme / theme toggle.** Still one fixed dark aesthetic.
+- **No custom display font.** Still using the system font stack; open
+  follow-up if the user wants something more distinctive later.
+- **`packages/server` and `packages/shared` are still empty placeholders**
+  — no Express/Socket.IO/Drizzle/pg dependencies added yet, deferred until
+  server work actually starts.
 - **Environment quirk (this machine only):** Node.js is installed at
   `C:\Program Files\nodejs` (v24.18.0) but is **not on the system PATH**.
   Plain `node`/`npm` fail in a fresh shell until PATH is fixed. Worked
-  around this session by prefixing PATH inline per command. This isn't a
-  repo concern, but it'll bite again next session — the user should add
+  around this every session by prefixing PATH inline. The user should add
   `C:\Program Files\nodejs` to their PATH permanently (Windows Settings →
-  Environment Variables) since modifying system PATH isn't something I do
+  Environment Variables) since modifying system PATH isn't something done
   unprompted. Until then, prefix commands with:
   `$env:Path = "C:\Program Files\nodejs;" + $env:Path` (PowerShell).
-- Created `C:\Users\abuse\.claude\launch.json` and `run-client.bat`
-  (**outside the repo**, machine-local) so the Browser-pane preview tool
-  can launch the Vite dev server despite the PATH issue above. Not part of
-  the project; don't try to find these in the repo.
+- `C:\Users\abuse\.claude\launch.json` and `run-client.bat` exist **outside
+  the repo** (machine-local) so the Browser-pane preview tool can launch the
+  Vite dev server despite the PATH issue above. Not part of the project.
 
 ## What's next
 
-Core systems, in order (per original brief):
+**Immediate:** user is reviewing the new homepage direction at
+`http://localhost:5173`. Once confirmed:
+- Propagate the same `Navbar` + `.ac-card` game-card style to other
+  game-grid areas (e.g. a future full game library page) and every other
+  page, per the user's original instruction — deferred until those pages
+  exist or the direction is confirmed, whichever comes first.
 
-1. ~~Project scaffold + shared design system/theme~~ ✅ done this session
-2. **Auth & profile** (username, avatar, stats) — start here next session
+**Core systems still not built, in original brief order:**
+
+1. ~~Project scaffold + shared design system/theme~~ ✅ scaffolded session 1,
+   redesigned session 2 — pending user confirmation on the new direction
+2. **Auth & profile** (username, avatar, stats) — next real system to build
 3. Game module loader (`init/start/pause/destroy` + `gameOver` event
-   interface any mini-game plugs into) — this will define the contract
-   that eventually lives in `packages/shared`
+   interface any mini-game plugs into) — defines the contract that
+   eventually lives in `packages/shared`
 4. Matchmaking queue: practice (solo) / for-fun (matched, no stakes) /
    for-stakes (matched, play-money escrow — data model + UI only, no real
-   payment processing)
+   payment processing). The homepage's "LIVE ARENA" player count should
+   become real once this exists.
 5. Wallet system (play-money balance, placeholder deposit/withdraw UI)
-6. Leaderboards (per-game + global)
+6. Leaderboards (per-game + global). The homepage's "View Leaderboards →"
+   link should point somewhere real once this exists.
 
 Only after all six are in place: first representative game per engine
 (spec fed one at a time by the user), then reskins for the remaining 43.
