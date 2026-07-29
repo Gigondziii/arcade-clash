@@ -6,7 +6,8 @@
   "main": "./registry.ts",
   "exports": {
     ".": "./registry.ts",
-    "./neon-runner": "./neon-runner/index.ts"
+    "./neon-runner": "./neon-runner/index.ts",
+    "./pixel-ninja-dash": "./pixel-ninja-dash/index.ts"
   },
   "dependencies": {
     "@arcadeclash/shared": "*"

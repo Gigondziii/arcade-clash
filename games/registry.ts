@@ -17,4 +17,10 @@ export type GameRegistryEntry = {
 
 export const gameRegistry: GameRegistryEntry[] = [
   { id: "neon-runner", name: "Neon Runner", engine: "runner", modulePath: "./neon-runner/index.ts" },
+  {
+    id: "pixel-ninja-dash",
+    name: "Pixel Ninja Dash",
+    engine: "reflex-timing",
+    modulePath: "./pixel-ninja-dash/index.ts",
+  },
 ];

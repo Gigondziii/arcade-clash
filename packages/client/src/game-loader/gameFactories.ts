@@ -5,4 +5,5 @@ import type { GameModuleFactory } from "@arcadeclash/shared";
 // one-line addition each; revisit only if that becomes genuinely tedious.
 export const gameFactories: Record<string, () => Promise<{ default: GameModuleFactory }>> = {
   "neon-runner": () => import("@arcadeclash/games/neon-runner"),
+  "pixel-ninja-dash": () => import("@arcadeclash/games/pixel-ninja-dash"),
 };
