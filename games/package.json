@@ -3,5 +3,12 @@
   "version": "0.0.1",
   "private": true,
   "type": "module",
-  "main": "./registry.ts"
+  "main": "./registry.ts",
+  "exports": {
+    ".": "./registry.ts",
+    "./neon-runner": "./neon-runner/index.ts"
+  },
+  "dependencies": {
+    "@arcadeclash/shared": "*"
+  }
 }

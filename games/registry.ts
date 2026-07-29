@@ -15,4 +15,6 @@ export type GameRegistryEntry = {
   modulePath: string;
 };
 
-export const gameRegistry: GameRegistryEntry[] = [];
+export const gameRegistry: GameRegistryEntry[] = [
+  { id: "neon-runner", name: "Neon Runner", engine: "runner", modulePath: "./neon-runner/index.ts" },
+];
