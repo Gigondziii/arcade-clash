@@ -24,6 +24,38 @@ Board, Reflex-Timing, Word/Trivia), then faster reskins for the rest.
 
 Repo root: `C:\Users\abuse\arcadeclash`
 
+## Current phase: games-building (solo/practice only)
+
+**As of 2026-07-29 (session 3), this is a dedicated games-building phase.**
+Goal: implement and fully test all 51 mini-games from the (external) design
+doc — one at a time, or by engine cluster where it makes sense — each
+running solo in practice mode through the GameModule loader. No opponent,
+no real-time sync, no backend systems beyond what a single-player game
+needs client-side.
+
+**Explicitly out of scope until the user says otherwise. Do not build,
+stub further, or suggest building any of these — even if a game's spec
+describes multiplayer/opponent behavior, skip or no-op that part and ship
+only the solo/practice version:**
+- Auth & user profiles
+- Matchmaking (practice/for-fun/for-stakes queue)
+- Wallet / stakes / escrow system
+- Leaderboards
+- Real-time opponent sync (WebSocket match state, etc.)
+
+These are deliberately deferred to a separate phase **after** all 51 games
+are built and tested individually — not forgotten, not an oversight. If a
+fresh agent reads this cold: do not "helpfully" start scaffolding any of
+the five items above during this phase, even partially.
+
+**Status correction:** the GameModule loader (`init/start/pause/destroy` +
+`gameOver` event interface) does **not** exist yet as of the start of this
+phase, despite being referred to conversationally as "the loader we just
+built." `packages/shared/src/index.ts` is still `export {}`. Building this
+loader is the first prerequisite of the games phase — every game needs it
+to plug in — and is **not** one of the deferred items above; it's required
+infrastructure, not a backend/multiplayer system.
+
 ## Stack decisions (confirmed with user)
 
 - Language: **TypeScript** everywhere (client, server, shared, theme, games)
@@ -134,6 +166,16 @@ wallet, etc.) don't exist yet, so there was nothing to propagate to yet.
 4. Two commits: theme rewrite, then homepage build (on top of session 1's
    four checkpoint commits — six total, see `git log --oneline`).
 
+### Session 3 (2026-07-29) — phase change, no code yet
+
+User gave a status-check request (answered by reading this file + verifying
+the actual repo contents on disk — confirmed accurate at the time), then
+declared a shift into a dedicated games-building phase: build and test all
+51 games solo/practice-only before touching auth, matchmaking, wallet, or
+leaderboards. See "Current phase" above for the full scope statement. No
+code changed this session — just this file, committed as its own
+checkpoint, before starting on the GameModule loader + game 1.
+
 ## Decisions / tradeoffs (read before changing structure)
 
 - **Theme is its own package (`packages/theme`), not `packages/client/src/theme`.**
@@ -191,31 +233,33 @@ wallet, etc.) don't exist yet, so there was nothing to propagate to yet.
 
 ## What's next
 
-**Immediate:** user is reviewing the new homepage direction at
-`http://localhost:5173`. Once confirmed:
-- Propagate the same `Navbar` + `.ac-card` game-card style to other
-  game-grid areas (e.g. a future full game library page) and every other
-  page, per the user's original instruction — deferred until those pages
-  exist or the direction is confirmed, whichever comes first.
+**Current priority (games-building phase, see above):**
 
-**Core systems still not built, in original brief order:**
+1. Build the GameModule loader — `init/start/pause/destroy` + `gameOver`
+   event interface — in `packages/shared`, plus whatever minimal client-side
+   mount/unmount harness (`packages/client/src/game-loader/` per the
+   originally proposed structure) is needed to run one solo in the browser.
+   This is the first real task of this phase.
+2. Build and test the 51 games one at a time / by engine cluster, each
+   solo/practice-only, plugging into the loader above. The user feeds specs
+   from an external design doc one at a time — this file won't have the
+   spec content, only what's actually been built.
+3. Homepage direction (session 2's violet/gold redesign) is still pending
+   the user's explicit visual confirmation — propagating the `Navbar` +
+   `.ac-card` style to other pages stays paused until then, independent of
+   the games work above.
 
-1. ~~Project scaffold + shared design system/theme~~ ✅ scaffolded session 1,
-   redesigned session 2 — pending user confirmation on the new direction
-2. **Auth & profile** (username, avatar, stats) — next real system to build
-3. Game module loader (`init/start/pause/destroy` + `gameOver` event
-   interface any mini-game plugs into) — defines the contract that
-   eventually lives in `packages/shared`
-4. Matchmaking queue: practice (solo) / for-fun (matched, no stakes) /
-   for-stakes (matched, play-money escrow — data model + UI only, no real
-   payment processing). The homepage's "LIVE ARENA" player count should
-   become real once this exists.
-5. Wallet system (play-money balance, placeholder deposit/withdraw UI)
-6. Leaderboards (per-game + global). The homepage's "View Leaderboards →"
-   link should point somewhere real once this exists.
+**Deferred until all 51 games are built and tested (do not start early —
+see "Current phase" above for the full list and rationale):**
 
-Only after all six are in place: first representative game per engine
-(spec fed one at a time by the user), then reskins for the remaining 43.
+- Auth & profile (username, avatar, stats)
+- Matchmaking queue (practice/for-fun/for-stakes + escrow data model)
+- Wallet system (play-money balance, placeholder deposit/withdraw UI)
+- Leaderboards (per-game + global)
+- Real-time opponent sync
+
+The homepage's "LIVE ARENA" player count and "View Leaderboards →" link
+stay mock/dead until matchmaking and leaderboards are eventually built.
 
 ## How to resume
 
