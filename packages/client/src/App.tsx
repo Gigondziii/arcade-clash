@@ -1,7 +1,7 @@
-import ThemePreview from './pages/ThemePreview'
+import HomePage from './pages/HomePage'
 
 function App() {
-  return <ThemePreview />
+  return <HomePage />
 }
 
 export default App
