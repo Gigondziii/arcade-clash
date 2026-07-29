@@ -60,8 +60,9 @@ shows the results screen). Games can plug in from here on.
 | Game | Engine | Status |
 |---|---|---|
 | Neon Runner | runner | ✅ built + tested, practice mode only |
+| Pixel Ninja Dash | reflex-timing | ✅ built + tested, practice mode only |
 
-50 of 51 remaining. Update this table each time a game is finished.
+49 of 51 remaining. Update this table each time a game is finished.
 
 ## Stack decisions (confirmed with user)
 
@@ -221,6 +222,41 @@ First real build of the games phase. Built, in order:
    point.
 5. Three commits: `GameModule` interface, Neon Runner, GameLoader +
    homepage wiring.
+
+### Session 5 (2026-07-29) — Pixel Ninja Dash (game 2 of 51)
+
+Second game, `reflex-timing` engine cluster (as opposed to Neon Runner's
+`runner`). Same architecture as game 1 (vanilla DOM+Canvas module, own
+constants/engine/index.ts files, tsx-verified engine logic, then
+hand-verified DOM/lifecycle in the Browser pane) but a meaningfully
+different mechanic, confirming the GameModule/GameLoader plumbing
+generalizes rather than being accidentally Neon-Runner-shaped:
+
+- Fixed forward pace (no difficulty ramp, per this game's spec) instead of
+  Neon Runner's speed-ramping.
+- A single input (Space/tap = dash) instead of two (jump + slide).
+- Failure **doesn't end the run** — missing an obstacle triggers a timed
+  stumble (temporary slowdown) rather than instant collision-death. This
+  is a real mechanical difference the spec called for ("mistimed inputs
+  cause a stumble that costs time"), not a copy-paste of Neon Runner.
+- Fixed-length course with two end conditions (reach the finish line, or
+  60s timer expires) instead of Neon Runner's endless-until-collision.
+  Obstacles are pre-generated once in `reset()` for the whole course
+  (simpler and correct, unlike a streaming spawn-lookahead scheme, which
+  isn't needed when the track has a known end).
+- Score rewards progress + clean-hit style bonus (perfect > good) +
+  a finish-time bonus if the track is completed with time to spare.
+
+Verified the same two ways as game 1: `npx tsx` against the standalone
+`DashEngine` (13 checks — auto-progress, miss-triggers-stumble, perfect
+clear, good clear, early-press-is-a-no-op, finishes before 60s, times out
+if never dashing — all pass) and by-hand in-browser lifecycle check
+(mount → pause → quit → `gameOver` → results screen → Play Again →
+input dispatch → Exit), zero console errors. Same rAF/compositing sandbox
+limitation as before — live animation not visually confirmed here.
+
+Added to `trendingGames` as a new card (no existing mock placeholder was
+`reflex-timing`, so this was an addition, not a swap like Neon Runner's).
 
 ## Decisions / tradeoffs (read before changing structure)
 
