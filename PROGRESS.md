@@ -48,13 +48,20 @@ are built and tested individually — not forgotten, not an oversight. If a
 fresh agent reads this cold: do not "helpfully" start scaffolding any of
 the five items above during this phase, even partially.
 
-**Status correction:** the GameModule loader (`init/start/pause/destroy` +
-`gameOver` event interface) does **not** exist yet as of the start of this
-phase, despite being referred to conversationally as "the loader we just
-built." `packages/shared/src/index.ts` is still `export {}`. Building this
-loader is the first prerequisite of the games phase — every game needs it
-to plug in — and is **not** one of the deferred items above; it's required
-infrastructure, not a backend/multiplayer system.
+**Status correction (resolved in session 4):** at the start of this phase
+the GameModule loader didn't exist yet, despite earlier being referred to
+conversationally as "the loader we just built." It's now built — see
+`packages/shared/src/gameModule.ts` (the interface) and
+`packages/client/src/game-loader/` (the host that mounts a module and
+shows the results screen). Games can plug in from here on.
+
+## Games built (games-building phase progress)
+
+| Game | Engine | Status |
+|---|---|---|
+| Neon Runner | runner | ✅ built + tested, practice mode only |
+
+50 of 51 remaining. Update this table each time a game is finished.
 
 ## Stack decisions (confirmed with user)
 
@@ -80,18 +87,19 @@ arcadeclash/
 │   │       ├── lib/format.ts  # formatPlays(), engineLabel() display helpers
 │   │       ├── mock/homeData.ts   # PLACEHOLDER data — see "Decisions" below
 │   │       ├── components/    # Navbar, Hero, TrendingArena, GameCard, StarRating, icons
+│   │       ├── game-loader/   # GameLoader.tsx (host chrome + results screen), gameFactories.ts
 │   │       └── pages/HomePage.tsx
 │   ├── server/                 # PLACEHOLDER — package.json + empty src/index.ts, no deps yet
-│   ├── shared/                 # PLACEHOLDER — package.json + empty src/index.ts, no types yet
+│   ├── shared/                 # package.json + src/gameModule.ts (GameModule interface) + index.ts
 │   └── theme/                  # design system package — see below
 │       └── src/
 │           ├── theme.css       # :root CSS custom properties + .ac-* base classes
 │           ├── tokens.ts       # colors/categoryColors objects + getThemeColor()
 │           └── index.ts
 └── games/
-    ├── package.json            # @arcadeclash/games workspace package
-    ├── registry.ts              # typed GameRegistryEntry[] — empty, no games added yet
-    └── <game-name>/             # (none yet — this is where each future game lives)
+    ├── package.json            # @arcadeclash/games workspace package, exports map per game
+    ├── registry.ts              # typed GameRegistryEntry[] — see "Games built" below
+    └── neon-runner/             # constants.ts, engine.ts (state/physics/draw), index.ts (module)
 ```
 
 ## What was built
@@ -176,6 +184,44 @@ leaderboards. See "Current phase" above for the full scope statement. No
 code changed this session — just this file, committed as its own
 checkpoint, before starting on the GameModule loader + game 1.
 
+### Session 4 (2026-07-29) — GameModule loader + Neon Runner (game 1 of 51)
+
+First real build of the games phase. Built, in order:
+
+1. **`GameModule` interface** (`packages/shared/src/gameModule.ts`):
+   `init(container, mode, opponentSocket)` / `start()` / `pause()` /
+   `destroy()`, extends `EventTarget` and dispatches a `"gameOver"`
+   `CustomEvent<GameOverPayload>` (`{ score, reason, durationMs }`, `reason`
+   is a plain `string` so each game can define its own codes rather than
+   being forced into runner-specific ones like `"collision"`). `GameMode` is
+   `"practice" | "match"` for interface stability, but only `"practice"` is
+   implemented right now.
+2. **Neon Runner** (`games/neon-runner/`) — the user's actual spec: endless
+   side-scrolling runner, jump (variable height via hold/cut) and slide
+   (timed) to avoid two obstacle types (ground hurdle, overhead beam),
+   distance-based score, ramping speed + spawn-rate difficulty, countdown,
+   live HUD, pause overlay (Resume/Quit), particle trail on actions. Plain
+   DOM + Canvas 2D, no framework/engine dependency, own neon palette (see
+   decisions below).
+3. **`GameLoader`** (`packages/client/src/game-loader/GameLoader.tsx`) +
+   **`gameFactories`** map — the host chrome: mounts a module via its
+   factory in practice mode, listens for `gameOver`, renders the results
+   screen. Wired into the homepage: the mock "Sky Runner" trending-game
+   entry was replaced with the real Neon Runner (now clickable — the only
+   card that is, since it's the only real game).
+4. **Verification, two-pronged** (see decisions below for why): the
+   `RunnerEngine`'s pure update/collision logic was verified with a
+   standalone script run via `npx tsx` (jump-clears-hurdle,
+   slide-clears-overhang, standing-under-either-collides, variable jump
+   height, difficulty ramp — all pass, independent of any browser). Then
+   the full in-browser flow (card click → dynamic import → mount →
+   countdown → pause/resume → quit → `gameOver` → results screen → Play
+   Again remounts cleanly → Back to Home returns to the homepage cleanly)
+   was verified by hand in the Browser-pane tool. No console errors at any
+   point.
+5. Three commits: `GameModule` interface, Neon Runner, GameLoader +
+   homepage wiring.
+
 ## Decisions / tradeoffs (read before changing structure)
 
 - **Theme is its own package (`packages/theme`), not `packages/client/src/theme`.**
@@ -230,20 +276,71 @@ checkpoint, before starting on the GameModule loader + game 1.
 - `C:\Users\abuse\.claude\launch.json` and `run-client.bat` exist **outside
   the repo** (machine-local) so the Browser-pane preview tool can launch the
   Vite dev server despite the PATH issue above. Not part of the project.
+- **A GameModule owns its own in-run UI (countdown, live HUD, pause
+  overlay); the host (`GameLoader`) owns the post-run results screen.**
+  "Back to Lobby"/navigation is fundamentally a host concern the module has
+  no way to perform through its fixed `init/start/pause/destroy` interface,
+  so results-screen actions (Play Again, Back to Home) live in `GameLoader`
+  once, reusable across all 51 games, instead of every game reimplementing
+  navigation buttons it can't actually act on. A module just needs to fire
+  `gameOver` reliably when a run ends (collision, quit, whatever) — nothing
+  else. Renamed the spec's "Rematch"/"Back to Lobby" to "Play Again"/"Back
+  to Home" since there's no opponent or lobby concept yet.
+- **Each game module can have its own visual palette, distinct from the
+  app-shell theme.** Neon Runner's cyan/magenta/purple/lime in-canvas
+  palette (`games/neon-runner/constants.ts`) is deliberately NOT the same
+  as `@arcadeclash/theme`'s violet/gold — the shared theme governs app
+  chrome (nav, homepage, the results screen), while a game's own in-canvas
+  look is that game's call per its spec. Don't "fix" a future game's palette
+  to match the app theme unless its spec asks for that.
+- **`gameFactories.ts` is a manual, explicit map** (game id → dynamic
+  `import()`), not auto-derived from `games/registry.ts`. One line per game;
+  revisit only if 51 manual lines actually becomes tedious in practice.
+  Similarly, `games/package.json`'s `"exports"` map needs one new entry per
+  game (mirrors how `@arcadeclash/theme` exports `./theme.css`).
+- **Touch input is intentionally simpler than keyboard for Neon Runner:**
+  a tap always yields a short controlled jump; there's no touch-hold for a
+  higher jump (only keyboard hold does that), because disambiguating
+  "hold to jump higher" vs "swipe down to slide" from a single touch
+  gesture reliably would need real gesture-intent detection. Keyboard fully
+  implements the spec's variable jump height; touch is a disclosed
+  simplification. Revisit if the user wants full parity.
+- **Sandbox limitation, relevant to every future game:**
+  `requestAnimationFrame` never fires in this Browser-pane tool because the
+  page never actually composites here (confirmed with a raw rAF counter
+  probe that stayed at 0 after 8+ real seconds; `setTimeout` fires
+  normally, so it's specifically rAF/compositing that's suspended, not all
+  JS). Practical fallout: you cannot observe a canvas game's live
+  animation, score-over-time, or rAF-driven collisions directly in this
+  tool. Coordinate-based clicks (the `computer` tool) are also unreliable
+  here for the same reason (no composited frame to hit-test against) —
+  use `javascript_tool` to query elements and call `.click()` on them
+  directly instead. To verify a game's actual logic, extract the
+  non-DOM-dependent state/update code into something importable
+  standalone (as `RunnerEngine` already is) and exercise it with
+  `npx tsx some-test-script.ts` — real Node, no browser, no rAF dependency,
+  fast and deterministic. Keep doing this for each new game: verify pure
+  logic via tsx, verify DOM/lifecycle wiring (mount, pause, gameOver,
+  cleanup) by hand in the Browser pane, and note in this file that live
+  rendering/animation itself couldn't be visually confirmed here — the
+  user should eyeball actual gameplay themselves at `localhost:5173`.
 
 ## What's next
 
 **Current priority (games-building phase, see above):**
 
-1. Build the GameModule loader — `init/start/pause/destroy` + `gameOver`
-   event interface — in `packages/shared`, plus whatever minimal client-side
-   mount/unmount harness (`packages/client/src/game-loader/` per the
-   originally proposed structure) is needed to run one solo in the browser.
-   This is the first real task of this phase.
-2. Build and test the 51 games one at a time / by engine cluster, each
-   solo/practice-only, plugging into the loader above. The user feeds specs
+1. ~~Build the GameModule loader~~ ✅ done session 4 (`packages/shared` +
+   `packages/client/src/game-loader/`).
+2. Build and test the remaining 50 games one at a time / by engine cluster,
+   each solo/practice-only, plugging into the loader. The user feeds specs
    from an external design doc one at a time — this file won't have the
-   spec content, only what's actually been built.
+   spec content, only what's actually been built. Update the "Games built"
+   table above as each one lands. For each new game: verify pure game
+   logic via `npx tsx` (see the sandbox-limitation decision above), verify
+   DOM/lifecycle wiring by hand in the Browser pane, add it to
+   `games/registry.ts` + `games/package.json`'s exports map +
+   `gameFactories.ts`, and make it clickable from somewhere on the
+   homepage/trending grid so it's actually reachable for testing.
 3. Homepage direction (session 2's violet/gold redesign) is still pending
    the user's explicit visual confirmation — propagating the `Navbar` +
    `.ac-card` style to other pages stays paused until then, independent of
