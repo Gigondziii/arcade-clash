@@ -17,7 +17,7 @@ export const trendingGames: MockGame[] = [
   { id: 'pixel-ninja-dash', title: 'Pixel Ninja Dash', engine: 'reflex-timing', plays: 0, rating: 0 },
   { id: 'turbo-drift', title: 'Turbo Drift', engine: 'racer', plays: 845_000, rating: 4.3 },
   { id: 'vault-siege', title: 'Vault Siege', engine: 'arena-shooter', plays: 2_100_000, rating: 4.8 },
-  { id: 'block-cascade', title: 'Block Cascade', engine: 'falling-block', plays: 532_000, rating: 4.1 },
+  { id: 'sky-dodge', title: 'Sky Dodge', engine: 'falling-block', plays: 0, rating: 0 },
   { id: 'pinball-frenzy', title: 'Pinball Frenzy', engine: 'physics-table', plays: 110_000, rating: 3.9 },
   { id: 'grid-duel', title: 'Grid Duel', engine: 'turn-based-board', plays: 268_000, rating: 4.4 },
 ]

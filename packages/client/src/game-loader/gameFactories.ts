@@ -6,4 +6,5 @@ import type { GameModuleFactory } from "@arcadeclash/shared";
 export const gameFactories: Record<string, () => Promise<{ default: GameModuleFactory }>> = {
   "neon-runner": () => import("@arcadeclash/games/neon-runner"),
   "pixel-ninja-dash": () => import("@arcadeclash/games/pixel-ninja-dash"),
+  "sky-dodge": () => import("@arcadeclash/games/sky-dodge"),
 };
