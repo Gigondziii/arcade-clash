@@ -55,6 +55,42 @@ conversationally as "the loader we just built." It's now built — see
 `packages/client/src/game-loader/` (the host that mounts a module and
 shows the results screen). Games can plug in from here on.
 
+**New per-game conventions, introduced session 7 — PENDING two answers
+before they're fully in effect (see below):** going forward, every game
+folder should use exactly `index.ts` / `engine.ts` / `skin.ts` /
+`README.md` (not `constants.ts`), and get a line in the new `GAMES.md`
+manifest at the repo root. `skin.ts` holds that game's tunable
+colors/sprites/difficulty numbers in one commented block; colors should
+come from `packages/theme` as named tokens rather than being hardcoded in
+`engine.ts`/`skin.ts`. Engine code should be reused across games in the
+same engine cluster rather than duplicated — but where shared engine code
+should physically live (inside the original game's folder vs. a new
+shared location) needs to be asked about case-by-case, not decided
+unilaterally, per explicit user instruction not to scatter/create new
+shared files without flagging it first.
+
+**Two open questions, asked in session 7, unanswered as of the last
+update to this file — do not guess at these, ask again if a fresh session
+needs them and they're still blank:**
+1. Should Neon Runner / Pixel Ninja Dash / Sky Dodge be retrofitted to
+   the conventions above (they currently use `constants.ts`, no README,
+   hardcoded local palettes, variable-dt loops — none of the new
+   conventions)? Or apply new conventions going forward only, or never
+   retrofit them?
+2. The user asked for "seeded RNG and inputLog additions" to the
+   `GameModule` interface as if they already existed — they don't. Also
+   asked for a fixed-timestep update loop (all 3 built games currently use
+   variable `dt` per frame). Proposed shape pending confirmation: a small
+   `packages/shared/src/rng.ts` (seeded PRNG), `GameOverPayload` gaining
+   optional `seed`/`inputLog` fields, each engine switching to a
+   fixed-timestep accumulator loop. Likely purpose: deterministic
+   replay (same seed + input log ⇒ same run), useful later for anti-cheat
+   or ghost-replay features — but this is inference, not confirmed.
+
+Until both are answered: don't build a 4th game (its actual spec was also
+still template placeholders as of session 7 — nothing to build yet
+regardless), and don't touch `packages/shared`/`packages/theme` for this.
+
 ## Games built (games-building phase progress)
 
 | Game | Engine | Status |
@@ -284,6 +320,28 @@ verified by hand afterward, zero console errors. Swapped the mock "Block
 Cascade" placeholder for the real Sky Dodge card (same pattern as Neon
 Runner replacing "Sky Runner" — matching engine, so a swap rather than an
 addition this time).
+
+### Session 7 (2026-07-29) — new conventions proposed, no game built
+
+User sent a template for how they want all future games built: a fixed
+per-game file layout (`index.ts`/`engine.ts`/`skin.ts`/`README.md`,
+replacing the `constants.ts` naming used so far), a root `GAMES.md`
+manifest, colors/spacing sourced from `packages/theme` as named tokens
+instead of hardcoded per-game, explicit engine reuse across games in the
+same cluster, and "seeded RNG and inputLog additions" to the GameModule
+interface plus a fixed-timestep update loop. The GAME SPEC section of the
+message was left as unfilled template placeholders (`[GAME NAME]`,
+`[game-slug]`, etc.) — there was no actual game to build this session.
+
+Created `GAMES.md` at the repo root (documents the 3 existing games,
+notes their file layout doesn't match the new convention yet). Did not
+build any game code, touch `packages/shared`, or touch `packages/theme` —
+asked two clarifying questions first (see "Current phase" above for full
+detail): whether to retrofit the 3 existing games to the new conventions,
+and whether the proposed RNG/inputLog/fixed-timestep design (new
+`packages/shared/src/rng.ts`, `GameOverPayload` gaining `seed`/`inputLog`,
+fixed-timestep accumulator loops) matches what the user actually wants.
+Both unanswered as of this entry — resolve before building game 4.
 
 ## Decisions / tradeoffs (read before changing structure)
 
