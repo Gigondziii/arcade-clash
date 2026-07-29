@@ -61,8 +61,9 @@ shows the results screen). Games can plug in from here on.
 |---|---|---|
 | Neon Runner | runner | ✅ built + tested, practice mode only |
 | Pixel Ninja Dash | reflex-timing | ✅ built + tested, practice mode only |
+| Sky Dodge | falling-block | ✅ built + tested, practice mode only |
 
-49 of 51 remaining. Update this table each time a game is finished.
+48 of 51 remaining. Update this table each time a game is finished.
 
 ## Stack decisions (confirmed with user)
 
@@ -258,8 +259,47 @@ limitation as before — live animation not visually confirmed here.
 Added to `trendingGames` as a new card (no existing mock placeholder was
 `reflex-timing`, so this was an addition, not a swap like Neon Runner's).
 
+### Session 6 (2026-07-29) — Sky Dodge (game 3 of 51)
+
+Third game, classified as the `falling-block` engine's representative
+(see decisions below for why — it's a judgment call, not stated by the
+user). Vertical dodger: hazards rain down at increasing fall speed, ship
+moves continuously left/right (held arrow keys, or drag-to-follow via
+pointer) to avoid them, any hit without an active shield ends the run.
+Score is simply whole survival seconds. Adds a Spacebar shield ability
+(brief invulnerability, cooldown-gated) — the first ability/cooldown
+mechanic across the three games so far, and the first game needing
+continuous held-key input (`moveLeft`/`moveRight` as persistent state)
+rather than the previous two games' edge-triggered single actions.
+
+Verified the same two-pronged way as games 1–2: a standalone `npx tsx`
+script against `DodgeEngine` (11 checks) caught a real bug — `elapsed`
+accumulated from repeated `+= 1/60` landed at `2.999999999996` instead of
+`3.0` due to float rounding, making `Math.floor(elapsed)` under-report the
+score by 1 right at second boundaries. Fixed with a small epsilon before
+flooring (`Math.floor(elapsed + 1e-6)`). Caught before it ever reached the
+browser — this is exactly why the tsx-verification step earns its keep.
+Full in-browser lifecycle (mount, pause, quit, gameOver, replay, exit)
+verified by hand afterward, zero console errors. Swapped the mock "Block
+Cascade" placeholder for the real Sky Dodge card (same pattern as Neon
+Runner replacing "Sky Runner" — matching engine, so a swap rather than an
+addition this time).
+
 ## Decisions / tradeoffs (read before changing structure)
 
+- **Engine classification (`GameEngine` value in `games/registry.ts`) is
+  my judgment call per game, not something the user's specs state
+  explicitly.** Each spec has a "Genre" field ("Runner / Reflex" for all
+  three games so far) which is marketing flavor text, NOT the same as the
+  8-engine technical classification from the original brief. I classify by
+  actual shared-code pattern: Neon Runner → `runner` (forward-scrolling,
+  jump/slide physics), Pixel Ninja Dash → `reflex-timing` (discrete
+  timing-window input against a shrinking ring), Sky Dodge → `falling-block`
+  (spawner + falling objects + playfield collision, even though it's a
+  dodge/survival game rather than a match-3 puzzle — the technical pattern
+  of "things fall from the top of a vertical playfield" is what the engine
+  category is about, not the win condition). If the user's actual external
+  design doc classifies these differently, defer to that and relabel.
 - **Theme is its own package (`packages/theme`), not `packages/client/src/theme`.**
   Reason: game modules under `/games/<name>/` need the theme too, and they
   must not depend on `packages/client` (client's future game-loader will
