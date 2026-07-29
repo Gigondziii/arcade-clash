@@ -12,7 +12,8 @@ export type MockGame = {
 }
 
 export const trendingGames: MockGame[] = [
-  { id: 'sky-runner', title: 'Sky Runner', engine: 'runner', plays: 1_200_000, rating: 4.6 },
+  // Real, playable (see gameFactories.ts) — plays/rating are honestly 0, not fabricated popularity.
+  { id: 'neon-runner', title: 'Neon Runner', engine: 'runner', plays: 0, rating: 0 },
   { id: 'turbo-drift', title: 'Turbo Drift', engine: 'racer', plays: 845_000, rating: 4.3 },
   { id: 'vault-siege', title: 'Vault Siege', engine: 'arena-shooter', plays: 2_100_000, rating: 4.8 },
   { id: 'block-cascade', title: 'Block Cascade', engine: 'falling-block', plays: 532_000, rating: 4.1 },

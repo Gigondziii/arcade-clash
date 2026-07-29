@@ -1,8 +1,14 @@
+import { gameFactories } from '../game-loader/gameFactories'
 import { trendingGames } from '../mock/homeData'
 import GameCard from './GameCard'
 import { TrendingIcon } from './icons'
 
-export default function TrendingArena() {
+type TrendingArenaProps = {
+  onPlayGame: (id: string, title: string) => void
+  loadingGameId: string | null
+}
+
+export default function TrendingArena({ onPlayGame, loadingGameId }: TrendingArenaProps) {
   return (
     <section style={{ margin: '0 var(--space-6) var(--space-8)' }}>
       <div
@@ -30,7 +36,15 @@ export default function TrendingArena() {
         }}
       >
         {trendingGames.map((game) => (
-          <GameCard key={game.id} title={game.title} engine={game.engine} plays={game.plays} rating={game.rating} />
+          <GameCard
+            key={game.id}
+            title={game.title}
+            engine={game.engine}
+            plays={game.plays}
+            rating={game.rating}
+            loading={loadingGameId === game.id}
+            onPlay={game.id in gameFactories ? () => onPlayGame(game.id, game.title) : undefined}
+          />
         ))}
       </div>
     </section>

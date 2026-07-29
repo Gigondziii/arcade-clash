@@ -8,13 +8,31 @@ type GameCardProps = {
   engine: GameEngine
   plays: number
   rating: number
+  onPlay?: () => void
+  loading?: boolean
 }
 
-export default function GameCard({ title, engine, plays, rating }: GameCardProps) {
+export default function GameCard({ title, engine, plays, rating, onPlay, loading }: GameCardProps) {
   const tagColor = categoryColors[engine]
 
   return (
-    <div className="ac-card">
+    <div
+      className="ac-card"
+      role={onPlay ? 'button' : undefined}
+      tabIndex={onPlay ? 0 : undefined}
+      onClick={onPlay}
+      onKeyDown={
+        onPlay
+          ? (e) => {
+              if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault()
+                onPlay()
+              }
+            }
+          : undefined
+      }
+      style={onPlay ? { cursor: 'pointer' } : undefined}
+    >
       <div
         style={{
           position: 'relative',
@@ -34,7 +52,7 @@ export default function GameCard({ title, engine, plays, rating }: GameCardProps
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
           <StarRating rating={rating} />
           <span className="ac-text-muted ac-text-mono" style={{ fontSize: 'var(--font-size-xs)' }}>
-            {formatPlays(plays)} PLAYS
+            {loading ? 'Loading…' : `${formatPlays(plays)} PLAYS`}
           </span>
         </div>
       </div>
