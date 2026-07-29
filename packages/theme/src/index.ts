@@ -1,2 +1,2 @@
-export { colors, getThemeColor } from "./tokens";
-export type { ThemeColorName } from "./tokens";
+export { colors, categoryColors, getThemeColor } from "./tokens";
+export type { ThemeColorName, CategoryName } from "./tokens";
