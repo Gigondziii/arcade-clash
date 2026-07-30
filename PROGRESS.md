@@ -33,9 +33,11 @@ systems (auth, matchmaking, real-time sync, wallet) that every game will
 eventually plug into, validating each against one existing game (not yet
 chosen which) before assuming it generalizes to the rest. Games-building
 isn't abandoned — 3/51 built, 48 remain — just paused while systems work
-happens. **Auth & profile is done as of session 8** (see the session log
-below); matchmaking, wallet, and real-time sync have NOT been started —
-still genuinely future work, not a stale warning this time.
+happens. **Auth & profile is done and verified end-to-end against a real
+database as of session 8** (see the session log below — signup/login/
+logout/profile all confirmed working, both at the API level and through
+the actual browser UI); matchmaking, wallet, and real-time sync have NOT
+been started — still genuinely future work, not a stale warning this time.
 
 ### Original games-building phase (sessions 3-7, for history)
 
@@ -368,17 +370,55 @@ matchmaking/wallet/real-time sync. Scope: user model, signup/login/logout/
 session persistence, profile page, navbar wiring, Postgres schema.
 
 **Checked the machine first: no Docker, no local Postgres.** Asked the
-user how to provision one — they chose a free cloud Postgres, and to
-paste the connection string directly in chat (it's a local dev secret,
-low risk, they were given the option to create the `.env` themselves
-instead and declined). **As of this entry, the DB URL hasn't arrived yet
-— `packages/server/.env`'s `DATABASE_URL` is still a placeholder
-(`REPLACE_ME_WITH_REAL_CONNECTION_STRING`), so no migration has been run
-and no real signup/login has actually persisted a user.** Everything
-below this line was verified as far as possible without a live DB (see
-"Decisions" for exactly how) — resolve `DATABASE_URL` and run
-`npm run db:generate && npm run db:migrate -w packages/server` before
-trusting auth as actually working end-to-end.
+user how to provision one — they chose a free cloud Postgres (Supabase)
+and to paste the connection string directly in chat.
+
+**DB setup took several rounds, all resolved — auth is now fully verified
+against a real database:**
+- Supabase's direct-connection hostname (`db.<ref>.supabase.co`) didn't
+  resolve (`ENOTFOUND`) — a known Supabase IPv6-only issue the user had
+  already anticipated. Switched to the session-pooler hostname/port
+  instead, which resolves fine.
+- The user didn't want to paste the password itself into chat for the
+  pooler string, so I wrote a small PowerShell script (run by the user,
+  never by me) that prompts for password/hostname/port with hidden input,
+  percent-encodes the password, and rewrites only the `DATABASE_URL` line
+  in `packages/server/.env` in place — never printing the value. First
+  version failed to parse on Windows PowerShell 5.1 because it contained
+  em-dashes and the file had no UTF-8 BOM (PS 5.1 falls back to the
+  system ANSI codepage without one, corrupting multi-byte characters
+  mid-file). Rewrote it ASCII-only and saved via `Set-Content -Encoding
+  UTF8`, which does add a BOM under Windows PowerShell 5.1 (unlike
+  PS 7+, where UTF8 is BOM-less by default) — confirmed via a byte-level
+  check before telling the user it was fixed.
+- Verified connectivity with a throwaway script reporting only
+  success/failure and the hostname, never the credential, per the user's
+  explicit ask.
+- Ran `drizzle-kit generate` (produced `drizzle/0000_early_marrow.sql`,
+  matching the schema exactly) then `drizzle-kit migrate` — applied
+  cleanly to the real database.
+- **Found a real environment gotcha while verifying:** a schema check
+  right after migrating hit "password authentication failed," which
+  turned out to be a stale, months-old-in-session-time server process
+  still squatting on port 4000 with an old `DATABASE_URL` loaded in
+  memory — from an earlier restart this session that git-bash's
+  `pkill -f "tsx watch"` silently failed to actually kill (it doesn't
+  reliably match Windows-native node process command lines). Found and
+  force-killed every lingering node process via PowerShell's
+  `Get-CimInstance Win32_Process` + `Stop-Process`, confirmed via
+  `netstat` that the freshly-started process actually held the port
+  this time. **Lesson: on this machine, restart the server via
+  PowerShell process inspection, not `pkill`, if there's ever any doubt
+  whether the old process actually died.**
+- Full flow verified twice: once at the API level directly (signup 201,
+  `/me` 200 with session / 401 without, logout 204, login 200 with
+  correct password / 401 with wrong password) against a real inserted
+  row, and again end-to-end through the actual browser UI (signup modal
+  → navbar avatar updates → Profile page shows real username/join-date/
+  stats → Log out → navbar reverts → Profile page's logged-out fallback
+  correctly triggers). Zero console errors throughout. Two test accounts
+  now exist in the real database (`testplayer1`, `browsertest`) — left in
+  place, not cleaned up; harmless, but say the word if you want them gone.
 
 **Built:**
 1. `packages/server`, real for the first time (was an empty placeholder):
@@ -417,19 +457,33 @@ trusting auth as actually working end-to-end.
    rejections to error middleware natively) plus added a global error
    handler as a last-resort safety net. Verified: the same failure now
    returns a clean 500 and the server keeps running.
-6. Verified everything reachable without a live DB: server boots and
-   `/api/health` responds; `/api/auth/me` correctly 401s with no cookie;
-   CORS + credentialed cross-origin cookies work between `:5173` and
-   `:4000`; the signup form submits, hits the real endpoint, and surfaces
-   the (currently expected) 500 cleanly in the UI without crashing
-   anything client or server side. The one thing NOT verified: an actual
-   successful signup/login/profile-view/logout round-trip against a real
-   database — blocked on `DATABASE_URL`.
+6. Verified everything reachable without a live DB first: server boots
+   and `/api/health` responds; `/api/auth/me` correctly 401s with no
+   cookie; CORS + credentialed cross-origin cookies work between `:5173`
+   and `:4000`; the signup form submits, hits the real endpoint, and
+   surfaces a clean 500 without crashing anything. Then, once the real
+   `DATABASE_URL` arrived (see below), verified the actual thing: a real
+   signup/login/profile-view/logout round-trip against the live Supabase
+   database, both via direct API calls and through the browser UI. Auth
+   is genuinely done, not just wired.
 7. Four commits: games type-fix, shared `PublicUser` type, server auth
    build, client auth build.
 
 ## Decisions / tradeoffs (read before changing structure)
 
+- **On this machine, `pkill -f "tsx watch"` (from the Bash tool/git-bash)
+  does not reliably kill the server's node process.** Discovered when a
+  stale process from an earlier restart silently kept holding port 4000
+  with an old `DATABASE_URL` loaded in memory, while a "successfully
+  restarted" new process never actually got the port. Git-bash's process
+  matching doesn't reliably see Windows-native node.exe command lines.
+  **Going forward: to restart the server, use PowerShell —
+  `Get-CimInstance Win32_Process -Filter "Name = 'node.exe'"` filtered to
+  ones whose `CommandLine` mentions `packages/server` or `tsx`, pipe to
+  `Stop-Process -Force`, THEN start the new one, and confirm via
+  `netstat -ano | findstr :4000` that the new PID actually holds the
+  port** before trusting that a restart took effect. This cost real time
+  to diagnose once already — don't reach for `pkill` for this again.
 - **Auth uses a JWT in an httpOnly cookie, not a server-side session
   store.** Reasoning: no sessions table/Redis needed at this scale, and it
   plays cleanly with Socket.IO later — the same JWT can authenticate a
@@ -599,17 +653,13 @@ trusting auth as actually working end-to-end.
 
 ## What's next
 
-**Immediate (blocking, session 8):** get a real `DATABASE_URL` from the
-user (they're setting up a free cloud Postgres), write it into
-`packages/server/.env`, run `npm run db:generate -w packages/server` then
-`npm run db:migrate -w packages/server`, restart the server, and verify an
-actual signup → login → view profile → logout round-trip against the
-real database. Only then is auth actually "done," not just wired.
-
 **Current priority — shared systems (see "Current phase" above):**
 
-1. ~~Auth & profile~~ ✅ built session 8, pending the DB-verification step
-   directly above.
+1. ~~Auth & profile~~ ✅ built AND verified end-to-end against the real
+   Supabase database session 8 — signup/login/logout/profile all
+   confirmed working via direct API calls and through the actual browser
+   UI. Two test accounts (`testplayer1`, `browsertest`) exist in the real
+   DB from verification; left in place, harmless.
 2. Matchmaking, real-time sync, and wallet — not started. Build order
    within these wasn't specified yet; ask before assuming.
 3. Once built, validate the systems against **one existing game** (not
