@@ -5,8 +5,7 @@ session) and `GAMES.md` (per-game manifest) before doing anything else.
 This file holds durable process rules, not project status — status lives
 in `PROGRESS.md`.
 
-## Documentation rules (added 2026-07-30, after an audit found docs
-## claiming features as "established" that didn't exist in code)
+## Documentation rules (added 2026-07-30, after an audit found docs claiming features as "established" that didn't exist in code)
 
 1. **Code is the source of truth.** If a doc (`PROGRESS.md`, `GAMES.md`,
    a game's own files, anything) and the actual code disagree, the code
@@ -32,8 +31,7 @@ in `PROGRESS.md`.
    reading it, grepping it, or running it) — don't write something as
    built based on it having been discussed, proposed, or intended.
 
-## Environment gotchas (this machine specifically — see PROGRESS.md
-## "Decisions" for full detail on each)
+## Environment gotchas (this machine specifically — see PROGRESS.md "Decisions" for full detail on each)
 
 - Node.js is not on the system PATH — prefix PowerShell commands with
   `$env:Path = "C:\Program Files\nodejs;" + $env:Path`.

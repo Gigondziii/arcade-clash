@@ -3,7 +3,175 @@
 Self-contained handoff doc. Read this first at the start of every session —
 conversations don't carry over, and work may resume from a different tool.
 
-## Status summary — read this first (updated 2026-07-30, end of session 9)
+## 60-second status (read only this to get oriented)
+
+**Stack:** React/Vite client, Express 5 + Drizzle ORM + Postgres (Supabase,
+cloud-hosted) server, npm workspaces monorepo (`packages/client`,
+`packages/server`, `packages/shared`, `packages/theme`, `games/*`).
+
+**BUILT (verified in code and/or browser — see "Architecture status"
+further down for the full audit):** auth — signup/login/logout/session/
+profile — verified via direct API calls AND full browser click-through
+against the real Supabase database; 3 of 51 practice-mode mini-games
+(Neon Runner, Pixel Ninja Dash, Sky Dodge), each with fully independent
+engine code (zero sharing between them); the `GameModule` interface
+(`init(container, mode, opponentSocket)` / `start` / `pause` / `destroy`,
+`GameOverPayload = { score, reason, durationMs }` — no `seed`, no
+`inputLog`); the `GameLoader` host chrome; homepage (colors/layout
+verified via DOM inspection, but never visually confirmed by the user in
+an actual live view — still an open seam, not a blocker).
+
+**PLANNED (described somewhere in this file or in conversation, NOT in
+code — confirmed absent by a 2026-07-30 read-only audit, grepped and
+read directly):** seeded RNG, `inputLog`, a fixed-timestep update loop, a
+real shared-engine abstraction (each game's `engine.ts` is fully
+independent — no two games have ever shared a cluster), the 8-engine
+cluster model as a tested abstraction, matchmaking, wallet, real-time
+sync, leaderboards.
+
+**EXACT NEXT STEP:** build the determinism foundation — seeded RNG,
+fixed-timestep loop, `inputLog`, retrofit all 3 existing games to use all
+three. Confirmed by the user, ahead of matchmaking. Full brief, with
+everything that session needs and nothing it doesn't, is the very next
+section below.
+
+**Also unconfirmed:** whether the user's own browser can reach
+`http://localhost:5173` after a session 9 fix (Vite was binding IPv6-only
+on this machine). Ask if this is still unconfirmed when a session starts.
+
+Everything past the next section is historical detail, decisions, and the
+session-by-session log — unchanged, just relocated below the summary so
+this file costs less context to read at the start of every session. Skim
+it only for the "why" behind something; it's not required to get oriented.
+
+## NEXT SESSION: DETERMINISM FOUNDATION
+
+Everything this session needs to start cold, with zero prior context.
+**Scope:** seeded RNG, fixed-timestep loop, `inputLog`, retrofit all 3
+existing games (Neon Runner, Pixel Ninja Dash, Sky Dodge) to use all
+three. **Matchmaking does not start this session — it comes after.**
+
+### Decisions already made — do not re-litigate these
+
+- **Retrofit all 3 existing games.** YES, confirmed.
+- **Build seeded RNG + fixed-timestep loop + `inputLog`.** YES, confirmed.
+- **Two separate RNG streams, gameplay and cosmetic, both derived from
+  one seed.** YES, confirmed. (This resolves the question raised by
+  session 10's audit about whether cosmetic-particle randomness needs
+  seeding too — it does, but as its own stream, so cosmetic-only
+  variation doesn't perturb the gameplay-affecting sequence or vice
+  versa. See the full `Math.random()` site list below for which sites go
+  in which stream.)
+- **Matchmaking comes after this, not before.** Confirmed explicitly,
+  twice now (sessions 10 and 11 — session 9 was an unrelated dev-server
+  fix, not a matchmaking-sequencing decision; don't cite it as one).
+
+### The one open question this session should answer before coding
+
+**Should `inputLog` entries be keyed on `{ timestamp, action }` or
+`{ tick, action }`?** Not yet decided — don't silently pick one without
+flagging it. `timestamp` (wall-clock ms) is simpler to record but less
+naturally tied to a fixed-timestep replay; `tick` (a frame-counter
+integer) ties directly to the fixed-timestep loop and is likely what
+actually enables exact replay, but depends on the loop existing first to
+define what a "tick" is.
+
+### Two small cleanups queued for this session (found during the doc audit, not yet done)
+
+- `games/sky-dodge/engine.ts`: remove the dead `playerMovingLeft` /
+  `playerMovingRight` fields on `DodgeEngine` — declared, never read or
+  written anywhere in the class.
+- `games/pixel-ninja-dash/engine.ts`: `dashFlashRemainingMs = 180` inside
+  `pressDash()` is a magic number, unlike every other tunable, which
+  lives in `constants.ts`'s `WORLD`/`TIMING`/`SCORE` objects. Move it
+  there for consistency.
+
+### Exact current state of the code this session will touch
+
+**The `GameModule` interface, verbatim, `packages/shared/src/gameModule.ts`:**
+
+```ts
+export type GameMode = "practice" | "match";
+
+export type GameOverPayload = {
+  score: number;
+  reason: string;
+  durationMs: number;
+};
+
+export interface GameModule extends EventTarget {
+  init(container: HTMLElement, mode: GameMode, opponentSocket: WebSocket | null): void;
+  start(): void;
+  pause(): void;
+  destroy(): void;
+}
+
+export type GameModuleFactory = () => GameModule;
+```
+
+No `seed` parameter, no `inputLog`/`meta` field — this session adds them.
+
+**The current variable-dt loop — identical shape in all 3 games'
+`index.ts` (`neon-runner` shown below; `pixel-ninja-dash` and `sky-dodge`
+match exactly except for which input flags get reset each frame):**
+
+```ts
+private loop = () => {
+  if (this.state !== "running") return;
+  const now = performance.now();
+  const dt = Math.min(0.05, (now - this.lastFrameTime) / 1000);
+  this.lastFrameTime = now;
+
+  const result = this.engine.update(dt, this.input);
+  this.input.jumpPressed = false;
+  this.input.jumpReleased = false;
+  this.input.slidePressed = false;
+
+  if (this.ctx) this.engine.draw(this.ctx);
+  if (this.hud) this.hud.textContent = `SCORE ${this.engine.score}`;
+
+  if (result === "collision") {
+    this.endRun("collision");
+    return;
+  }
+
+  this.rafId = requestAnimationFrame(this.loop);
+};
+```
+
+Line references: `neon-runner/index.ts:233-252`;
+`pixel-ninja-dash/index.ts:196-219`; `sky-dodge/index.ts:222-246` — same
+`dt` calculation, same `requestAnimationFrame(this.loop)` tail, different
+result-handling and input-reset lines per game.
+
+**Every `Math.random()` call site across the 3 games, labeled
+gameplay-affecting or cosmetic-only (17 total — grepped 2026-07-30):**
+
+`games/neon-runner/engine.ts`:
+- L106-108 (inside `spawnParticles()`: `vx`, `vy`, `life`) — **cosmetic-only**
+- L144 (`spawnTimerMs = spawnIntervalMs + Math.random() * 300`) — **gameplay-affecting** (obstacle spawn timing)
+- L145 (`type = Math.random() < 0.5 ? "hurdle" : "overhang"`) — **gameplay-affecting** (obstacle type)
+
+`games/pixel-ninja-dash/engine.ts`:
+- L95 (`d += WORLD.obstacleSpacingMin + Math.random() * (...)`) — **gameplay-affecting** (course layout, pre-generated once in `reset()`)
+- L109-111 (inside particle spawn: `vx`, `vy`, `life`) — **cosmetic-only**
+
+`games/sky-dodge/engine.ts`:
+- L84-86 (inside particle spawn: `vx`, `vy`, `life`) — **cosmetic-only**
+- L93 (hazard `size`) — **gameplay-affecting** (hitbox size)
+- L94 (hazard `shape`: block/shard) — **gameplay-affecting** (hitbox shape)
+- L95 (hazard `x` position) — **gameplay-affecting** (spawn position)
+- L114 (`Math.random() < 0.5` gating a movement-trail particle spawn) — **cosmetic-only** (just thins out the visual trail)
+- L136 (`spawnTimerSec = intervalSec + Math.random() * 0.15`) — **gameplay-affecting** (hazard spawn timing)
+
+**Tally: 7 gameplay-affecting, 10 cosmetic-only.** Every one of these
+needs to move to one of the two seeded RNG streams decided above.
+
+---
+
+# Full history and detail below (unchanged content, relocated — not required reading to get oriented; read for the "why")
+
+## Detailed status (superseded as the entry point by the 60-second summary above; kept for full verification-method detail)
 
 Written for someone with zero memory of anything below. Everything else in
 this file is historical detail/audit trail — this section is the map.
@@ -48,7 +216,7 @@ this file is historical detail/audit trail — this section is the map.
   correct now. Clean: the only history match is this file's own
   descriptive prose in a commit message; no `.env` has ever been added.
 
-### Fixed this session, verification is PARTIAL — user hasn't confirmed yet
+### Fixed session 9, verification is PARTIAL — user hasn't confirmed yet
 
 - **Vite dev server was reachable by my own tooling but refused
   connections from the user's actual browser** (`ERR_CONNECTION_REFUSED`
@@ -77,11 +245,11 @@ this file is historical detail/audit trail — this section is the map.
 - **Games: 3 of 51 built** (Neon Runner/runner, Pixel Ninja Dash/reflex-
   timing, Sky Dodge/falling-block). Seam: 48 remain, across racer/
   arena-shooter/physics-table/turn-based-board/word-trivia (untouched)
-  plus more runner/reflex-timing/falling-block reskins. Two questions
-  from session 7 (retrofit the 3 existing games to a new file-layout
-  convention? confirm a proposed seeded-RNG/inputLog/fixed-timestep
-  design?) are still unanswered — don't guess, ask again if they matter
-  before the next game gets built.
+  plus more runner/reflex-timing/falling-block reskins. Session 7's Q1
+  (retrofit the 3 existing games to a new file-layout convention?) is
+  still unanswered — don't guess, ask again if it matters before the next
+  game gets built. Session 7's Q2 (seeded-RNG/inputLog/fixed-timestep) is
+  now answered — see "NEXT SESSION: DETERMINISM FOUNDATION" at the top.
 - **Backend: only auth exists.** `packages/server/src/routes/` has
   exactly one file, `auth.ts`. No matchmaking, wallet, real-time sync, or
   leaderboard routes/tables/anything. Seam: this is a from-scratch build
@@ -96,44 +264,6 @@ this file is historical detail/audit trail — this section is the map.
   avatar instead); `gamesPlayed`/`gamesWon` default to 0 and nothing
   anywhere increments them yet, because no match has ever been played.
   Seam: these become real the moment matches produce results to write.
-
-### Exact next step for the next session
-
-**SUPERSEDED 2026-07-30 (session 10) — matchmaking is NOT next.** A
-read-only code audit (see "Architecture status" above) confirmed that
-seeded RNG, `inputLog`, a fixed-timestep loop, and a real shared-engine
-abstraction don't exist in code, despite earlier docs describing them as
-proposed/in-progress. The user's explicit instruction after the audit:
-**build the determinism foundation first** — seeded RNG, fixed-timestep
-loop, `inputLog`, and retrofit all 3 existing games to use all three —
-before starting matchmaking.
-
-This greenlights building roughly the shape already proposed in session
-7 (a small `packages/shared/src/rng.ts` seeded PRNG, `GameOverPayload`
-gaining `seed`/`inputLog` fields, each game's `loop()` switching from
-variable `dt` to a fixed-timestep accumulator) — the user asked for
-exactly that category of work, so treat the broad shape as confirmed, not
-still pending approval. Fine implementation details (exact PRNG
-algorithm, exact `inputLog` entry fields) are normal engineering judgment
-calls to make while building, not things to ask permission for one by
-one — flag assumptions as usual, don't stall on them.
-
-**Distinguish this from session 7's separate, still-unanswered Q1** (the
-`skin.ts`/`README.md` file-layout convention — see the "Two open
-questions" note above). "Retrofit all 3 games" in the user's determinism
-instruction means giving them seeded RNG/fixed-timestep/inputLog; it does
-not by itself say whether to also rename `constants.ts`→`skin.ts` or add
-`README.md` files. Don't conflate the two asks — ask which one is meant
-if it becomes ambiguous which "retrofit" is being discussed.
-
-**Also still unconfirmed:** whether the user's browser can now reach
-`http://localhost:5173` after the session 9 IPv6-binding fix. Ask if a
-fresh session starts and this was never confirmed either way.
-
-**Old plan, superseded by the above, kept for history — do not follow:**
-build matchmaking next, confirming first which existing game to validate
-against (Neon Runner suggested, unconfirmed) and whether "matchmaking"
-includes the real-time sync layer or that's separate.
 
 ### Noticed but deliberately not touched
 
@@ -216,7 +346,8 @@ There is no `inputLog` or `meta` field in `GameOverPayload` anywhere.
 - **Seeded RNG.** No `createSeededRandom`/seeded-PRNG utility exists
   anywhere in the repo. All 3 games use raw `Math.random()` for
   gameplay-affecting randomness (obstacle spawns, timing, positions), not
-  just cosmetic particles.
+  just cosmetic particles. (Full call-site list now in "NEXT SESSION:
+  DETERMINISM FOUNDATION" at the top of this file.)
 - **`inputLog`.** Does not exist anywhere. No game records
   `{ timestamp, action }` or anything resembling it.
 - **Fixed-timestep update loop.** All 3 games use a variable-timestep
@@ -243,6 +374,12 @@ There is no `inputLog` or `meta` field in `GameOverPayload` anywhere.
   `README.md`, theme-sourced colors) — proposed session 7, never adopted
   by any of the 3 built games, never confirmed by the user.
 - Matchmaking, wallet, real-time sync, leaderboards — not started.
+
+**Status as of session 11 (this doc-restructure session): seeded RNG,
+fixed-timestep, and `inputLog` are still PLANNED, not built — this
+session was documentation-only (see session 11 log below and the
+"NEXT SESSION" brief at the top). Building them is explicitly the next
+session's job.**
 
 ## Known gaps (blockers for public deployment, NOT for localhost dev)
 
@@ -292,6 +429,9 @@ database as of session 8** (see the session log below — signup/login/
 logout/profile all confirmed working, both at the API level and through
 the actual browser UI); matchmaking, wallet, and real-time sync have NOT
 been started — still genuinely future work, not a stale warning this time.
+As of session 10, the determinism foundation (seeded RNG/fixed-timestep/
+inputLog) is now confirmed to come BEFORE matchmaking — see "NEXT SESSION"
+at the top of this file.
 
 ### Original games-building phase (sessions 3-7, for history)
 
@@ -336,27 +476,30 @@ shared location) needs to be asked about case-by-case, not decided
 unilaterally, per explicit user instruction not to scatter/create new
 shared files without flagging it first.
 
-**Two open questions, asked in session 7, unanswered as of the last
-update to this file — do not guess at these, ask again if a fresh session
-needs them and they're still blank:**
-1. Should Neon Runner / Pixel Ninja Dash / Sky Dodge be retrofitted to
-   the conventions above (they currently use `constants.ts`, no README,
-   hardcoded local palettes, variable-dt loops — none of the new
-   conventions)? Or apply new conventions going forward only, or never
-   retrofit them?
-2. The user asked for "seeded RNG and inputLog additions" to the
-   `GameModule` interface as if they already existed — they don't. Also
-   asked for a fixed-timestep update loop (all 3 built games currently use
-   variable `dt` per frame). Proposed shape pending confirmation: a small
-   `packages/shared/src/rng.ts` (seeded PRNG), `GameOverPayload` gaining
-   optional `seed`/`inputLog` fields, each engine switching to a
-   fixed-timestep accumulator loop. Likely purpose: deterministic
-   replay (same seed + input log ⇒ same run), useful later for anti-cheat
-   or ghost-replay features — but this is inference, not confirmed.
+**Two open questions, asked in session 7 — Q2 is now resolved, Q1 is
+still open (do not guess at Q1, ask again if a fresh session needs it and
+it's still blank):**
+1. **STILL OPEN.** Should Neon Runner / Pixel Ninja Dash / Sky Dodge be
+   retrofitted to the file-layout conventions above (they currently use
+   `constants.ts`, no README, hardcoded local palettes — none of the new
+   file-layout conventions)? Or apply new conventions going forward only,
+   or never retrofit them? **Note: this is distinct from the determinism
+   retrofit below, which session 10 DID resolve — don't conflate the
+   two.**
+2. **RESOLVED session 10.** The user asked for "seeded RNG and inputLog
+   additions" to the `GameModule` interface as if they already existed —
+   they don't, confirmed by the session 10 audit. Also asked for a
+   fixed-timestep update loop (all 3 built games currently use variable
+   `dt` per frame). Session 10's follow-up confirmed: yes, build seeded
+   RNG + fixed-timestep + `inputLog`, retrofit all 3 games, two RNG
+   streams (gameplay/cosmetic) from one seed. Full brief in "NEXT
+   SESSION: DETERMINISM FOUNDATION" at the top of this file. The exact
+   `inputLog` key shape (`{ timestamp, action }` vs. `{ tick, action }`)
+   is the one remaining open detail — see that section.
 
-Until both are answered: don't build a 4th game (its actual spec was also
-still template placeholders as of session 7 — nothing to build yet
-regardless), and don't touch `packages/shared`/`packages/theme` for this.
+Until Q1 is answered: don't rename any of the 3 games' files or add
+per-game READMEs without asking first. The determinism work (Q2) is
+separately greenlit and does not require Q1 to be answered first.
 
 ## Games built (games-building phase progress)
 
@@ -409,6 +552,7 @@ arcadeclash/
 │   │       ├── db/            # schema.ts (users table), client.ts (pg Pool + drizzle)
 │   │       └── routes/auth.ts # signup/login/logout/me
 │   ├── shared/                 # package.json + src/{gameModule,user}.ts (GameModule interface, PublicUser) + index.ts
+│   │                            # NOTE: no rng.ts yet — PLANNED, next session builds it
 │   └── theme/                  # design system package — see below
 │       └── src/
 │           ├── theme.css       # :root CSS custom properties + .ac-* base classes
@@ -793,6 +937,38 @@ delete any historical narrative — corrections were added inline as
 `RESOLVED`/superseded markers, per explicit instruction to preserve
 original intent.
 
+### Session 11 (2026-07-30) — session close, doc restructure, handoff
+
+Documentation and summary only, no code changes — explicit scope.
+Restructured this file: pushed the large "Status summary" (now
+"Detailed status") and everything after it down, and replaced the top of
+the file with a genuinely-60-seconds-readable status summary plus a new
+"NEXT SESSION: DETERMINISM FOUNDATION" section containing everything that
+session needs cold — the `GameModule` interface verbatim, the current
+variable-dt loop as written (with exact file:line references in all 3
+games), every `Math.random()` call site across the 3 games labeled
+gameplay-affecting or cosmetic-only (17 sites, 7/10 split), the decisions
+already made (retrofit all 3 games yes; build seeded RNG + fixed
+timestep + inputLog yes; two RNG streams — gameplay and cosmetic — from
+one seed, yes; matchmaking after determinism, not before), the two small
+code cleanups queued (dead fields in `sky-dodge/engine.ts`, a magic
+number in `pixel-ninja-dash/engine.ts`), and the one real open question
+(`inputLog` keyed on `{ timestamp, action }` or `{ tick, action }`).
+
+Re-read `GAMES.md`, `PROGRESS.md` (post-restructure), and `CLAUDE.md`
+fresh, as instructed, checking specifically: (1) anything that would make
+a new session believe seeded RNG/inputLog/fixed-timestep/shared-engines
+already exist, (2) any claim missing a stated verification method, (3)
+any internal contradiction. `GAMES.md` and `CLAUDE.md` were already clean
+from session 10's pass — no changes needed. In `PROGRESS.md`, found and
+fixed: the "Architecture status" PLANNED list didn't explicitly restate
+that session 11 itself was documentation-only and didn't build any of the
+PLANNED items (a reader could otherwise wonder whether "session 11"
+quietly built something) — added an explicit line confirming they're
+still PLANNED after this session too. No contradictions found between
+the new top summary and the detailed sections below. See the top of this
+file for the full "what was fixed" list if this section is trimmed later.
+
 ## Decisions / tradeoffs (read before changing structure)
 
 - **On this machine, Vite's default (no `server.host` set) resolved
@@ -993,22 +1169,22 @@ original intent.
 
 ## What's next
 
-**Current priority — see "Architecture status" and "Exact next step"
-above for full detail; summary below. This numbered list is now stale in
-its ordering (item 0 supersedes item 2's old priority) — kept for
-history rather than renumbered/deleted:**
+**Current priority — see "NEXT SESSION: DETERMINISM FOUNDATION" at the
+top of this file for the full, self-contained brief. Summary below, kept
+for history rather than renumbered/deleted:**
 
 0. **(Added session 10, actually first) Build the determinism
    foundation** — seeded RNG, fixed-timestep loop, `inputLog`, retrofit
    all 3 existing games to use all three. Confirmed by the user as the
-   real next step, ahead of matchmaking. See "Exact next step" above for
-   the full detail on scope and what's already greenlit vs. still an
-   engineering judgment call.
+   real next step, ahead of matchmaking. See the top of this file for the
+   full detail on scope, decisions already made, and the one open
+   question.
 1. ~~Auth & profile~~ ✅ built AND verified end-to-end against the real
    Supabase database session 8 — signup/login/logout/profile all
    confirmed working via direct API calls and through the actual browser
    UI. Two test accounts (`testplayer1`, `browsertest`) existed in the
-   real DB from verification; deleted session 9 — table confirmed empty.
+   real DB from verification; deleted in session 8's close-out — table
+   confirmed empty.
 2. Matchmaking, real-time sync, and wallet — not started, and now
    explicitly AFTER item 0 above, not next. Build order among these three
    wasn't specified; ask before assuming.
