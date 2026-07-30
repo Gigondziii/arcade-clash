@@ -99,20 +99,41 @@ this file is historical detail/audit trail — this section is the map.
 
 ### Exact next step for the next session
 
-**First, before anything else:** confirm whether the user's browser can
-now actually reach `http://localhost:5173` after the IPv6-binding fix
-above. If a fresh session starts and this was never confirmed, ask —
-don't assume it's resolved and don't assume it's still broken either.
+**SUPERSEDED 2026-07-30 (session 10) — matchmaking is NOT next.** A
+read-only code audit (see "Architecture status" above) confirmed that
+seeded RNG, `inputLog`, a fixed-timestep loop, and a real shared-engine
+abstraction don't exist in code, despite earlier docs describing them as
+proposed/in-progress. The user's explicit instruction after the audit:
+**build the determinism foundation first** — seeded RNG, fixed-timestep
+loop, `inputLog`, and retrofit all 3 existing games to use all three —
+before starting matchmaking.
 
-Then, build **matchmaking** (the user explicitly said this, and
-explicitly said NOT to start it this session). Two things to confirm
-before writing code, not assume: (1) which existing game to validate the
-approach against — Neon Runner is the simplest candidate but wasn't
-confirmed, and (2) whether "matchmaking" this session means just the
-queue/pairing data model and UI, or also the real-time sync layer that
-was grouped alongside it — the user listed "auth, matchmaking, real-time
-sync, wallet" as four things without saying whether matchmaking-the-
-session includes sync or sync is its own later session.
+This greenlights building roughly the shape already proposed in session
+7 (a small `packages/shared/src/rng.ts` seeded PRNG, `GameOverPayload`
+gaining `seed`/`inputLog` fields, each game's `loop()` switching from
+variable `dt` to a fixed-timestep accumulator) — the user asked for
+exactly that category of work, so treat the broad shape as confirmed, not
+still pending approval. Fine implementation details (exact PRNG
+algorithm, exact `inputLog` entry fields) are normal engineering judgment
+calls to make while building, not things to ask permission for one by
+one — flag assumptions as usual, don't stall on them.
+
+**Distinguish this from session 7's separate, still-unanswered Q1** (the
+`skin.ts`/`README.md` file-layout convention — see the "Two open
+questions" note above). "Retrofit all 3 games" in the user's determinism
+instruction means giving them seeded RNG/fixed-timestep/inputLog; it does
+not by itself say whether to also rename `constants.ts`→`skin.ts` or add
+`README.md` files. Don't conflate the two asks — ask which one is meant
+if it becomes ambiguous which "retrofit" is being discussed.
+
+**Also still unconfirmed:** whether the user's browser can now reach
+`http://localhost:5173` after the session 9 IPv6-binding fix. Ask if a
+fresh session starts and this was never confirmed either way.
+
+**Old plan, superseded by the above, kept for history — do not follow:**
+build matchmaking next, confirming first which existing game to validate
+against (Neon Runner suggested, unconfirmed) and whether "matchmaking"
+includes the real-time sync layer or that's separate.
 
 ### Noticed but deliberately not touched
 
@@ -137,6 +158,104 @@ session includes sync or sync is its own later session.
   (`npx skills add supabase/agent-skills`) alongside the connection
   string the user gave — this read as generic Supabase UI copy, not a
   deliberate ask, so it was never run.
+
+## Architecture status: BUILT vs PLANNED (2026-07-30 audit, session 10)
+
+Standing rule going forward, also in `CLAUDE.md`: every architectural
+claim in this repo's docs must be labeled BUILT or PLANNED. Anything not
+verified in code right now is PLANNED — a doc saying something is
+"established" or "in place" is not evidence by itself, and this project's
+docs got ahead of the code once already (see below). Read this section
+before trusting any older passage that describes something as already
+working.
+
+### BUILT (verified by reading the actual code, 2026-07-30)
+
+**The `GameModule` interface, copied verbatim from
+`packages/shared/src/gameModule.ts`:**
+
+```ts
+export type GameMode = "practice" | "match";
+
+export type GameOverPayload = {
+  score: number;
+  reason: string;
+  durationMs: number;
+};
+
+export interface GameModule extends EventTarget {
+  init(container: HTMLElement, mode: GameMode, opponentSocket: WebSocket | null): void;
+  start(): void;
+  pause(): void;
+  destroy(): void;
+}
+
+export type GameModuleFactory = () => GameModule;
+```
+
+`reason` and `durationMs` are real — every game's `GameOverPayload`
+construction was grepped and matches this shape exactly. There is no
+`seed` parameter in `init()` anywhere, in the interface or in any game.
+There is no `inputLog` or `meta` field in `GameOverPayload` anywhere.
+
+- Auth (signup/login/logout/session/profile) — verified via direct API
+  calls + full browser click-through against the real Supabase DB.
+- 3 games (Neon Runner, Pixel Ninja Dash, Sky Dodge), each independently
+  implementing the interface above — engine logic verified via standalone
+  `tsx` scripts, DOM/lifecycle verified by hand in-browser.
+- `GameModule` loader + `GameLoader` host chrome.
+- `games/registry.ts`'s `engine` field values (`runner`, `reflex-timing`,
+  `falling-block`) — real, distinct values in real code. (Whether this
+  represents a *validated* shared-engine model is a separate question —
+  see PLANNED below. The field existing and being distinct is BUILT; the
+  abstraction it implies is not.)
+- Monorepo scaffold, theme/design system, Express/Drizzle/Postgres server.
+
+### PLANNED (verified absent — grepped/read the whole repo, none of this exists)
+
+- **Seeded RNG.** No `createSeededRandom`/seeded-PRNG utility exists
+  anywhere in the repo. All 3 games use raw `Math.random()` for
+  gameplay-affecting randomness (obstacle spawns, timing, positions), not
+  just cosmetic particles.
+- **`inputLog`.** Does not exist anywhere. No game records
+  `{ timestamp, action }` or anything resembling it.
+- **Fixed-timestep update loop.** All 3 games use a variable-timestep
+  loop (`dt = Math.min(0.05, (now - lastFrameTime) / 1000)`), not a
+  fixed-timestep accumulator.
+- **`seed` parameter in `GameModule.init()`.** Not in the interface, not
+  in any game. Real signature: `init(container, mode, opponentSocket)`.
+- **`seed`/`inputLog` fields in `GameOverPayload`.** Not present. Real
+  shape: `{ score, reason, durationMs }`.
+- **Shared engine abstraction.** Each of the 3 games has a fully
+  independent `engine.ts`; zero code is shared between them — every
+  import in every game's `engine.ts`/`index.ts` resolves to that game's
+  own local files or `@arcadeclash/shared`, never another game. What
+  looks shared is structural convention (similar class shapes, method
+  names) applied by hand each time, not an actual abstraction.
+- **The 8-engine cluster model, as a validated abstraction.** 3 of 8
+  engine labels are used, each by exactly one game. **No two built games
+  have ever shared an engine cluster — the "one representative game per
+  engine, then reskins" plan has never been tested.** There's no evidence
+  yet that a second `runner` game could reuse Neon Runner's engine rather
+  than needing its own from scratch, like all 3 games so far did
+  independently.
+- **Per-game file-layout convention** (`index.ts`/`engine.ts`/`skin.ts`/
+  `README.md`, theme-sourced colors) — proposed session 7, never adopted
+  by any of the 3 built games, never confirmed by the user.
+- Matchmaking, wallet, real-time sync, leaderboards — not started.
+
+## Known gaps (blockers for public deployment, NOT for localhost dev)
+
+None of these block continued local development. All of them should
+block shipping this publicly or handling real money:
+
+- **No rate limiting on `/api/auth/login` or `/api/auth/signup`.**
+  Nothing stops repeated password-guessing attempts.
+- **No CSRF token** — relying solely on the session cookie's
+  `sameSite: lax` attribute, which helps but isn't complete protection.
+- **JWT sessions have a flat 7-day expiry, no revocation/blocklist
+  mechanism, and no refresh-token rotation.** A leaked token stays valid
+  for up to 7 days with no way to force a logout.
 
 ## Project summary
 
@@ -201,8 +320,10 @@ conversationally as "the loader we just built." It's now built — see
 `packages/client/src/game-loader/` (the host that mounts a module and
 shows the results screen). Games can plug in from here on.
 
-**New per-game conventions, introduced session 7 — PENDING two answers
-before they're fully in effect (see below):** going forward, every game
+**New per-game conventions, introduced session 7 — PLANNED, not adopted
+by any built game (confirmed by the 2026-07-30 audit, "Architecture
+status" above). Do not read the rest of this paragraph as describing
+current reality:** going forward, every game
 folder should use exactly `index.ts` / `engine.ts` / `skin.ts` /
 `README.md` (not `constants.ts`), and get a line in the new `GAMES.md`
 manifest at the repo root. `skin.ts` holds that game's tunable
@@ -246,6 +367,12 @@ regardless), and don't touch `packages/shared`/`packages/theme` for this.
 | Sky Dodge | falling-block | ✅ built + tested, practice mode only |
 
 48 of 51 remaining. Update this table each time a game is finished.
+
+**Engine column note:** these are real, distinct field values in
+`games/registry.ts` (confirmed by the 2026-07-30 audit), but no two of
+these three games share actual engine code — see "Architecture status"
+above. Don't read this table as evidence the 8-engine shared-code model
+works; it hasn't been tested yet.
 
 ## Stack decisions (confirmed with user)
 
@@ -630,6 +757,42 @@ through my own tooling. **The user has not yet confirmed their own
 browser can reach it post-fix — treat this as fixed-but-unconfirmed, not
 resolved, until they say so.** One commit.
 
+### Session 10 (2026-07-30) — read-only audit, then doc cleanup
+
+User asked for a read-only code audit (no files touched) of several
+assumptions matchmaking would depend on: how many distinct engines the 3
+built games actually use, whether the engine abstraction is real code-
+sharing or copy-paste, whether the `GameModule` interface matches a
+`seed`/`inputLog`/`meta` spec, whether seeded RNG/fixed-timestep/
+`inputLog` actually exist, and a verbatim quote of session 7's two open
+questions. Answered each by reading the actual files and grepping —
+findings: registry labels are 3 distinct values as claimed, but the
+"engine" abstraction is not real (zero shared code between the 3 games'
+`engine.ts` files, confirmed via import analysis); the `GameModule`
+interface has no `seed` param and `GameOverPayload` has no `inputLog`/
+`meta`, only `{ score, reason, durationMs }`; seeded RNG/`inputLog`/
+fixed-timestep don't exist anywhere (grepped, zero matches) — all 3 games
+use raw `Math.random()` and a variable-`dt` loop.
+
+Then, this session: documentation-only cleanup (no code touched) in
+response to that audit. Listed every file in the repo making
+architectural claims (`PROGRESS.md`, `GAMES.md`; confirmed no `CLAUDE.md`
+and no game `README.md`s exist; noted the 51-game design doc lives
+outside the repo and `packages/client/README.md` is untouched generic
+Vite scaffold with no ArcadeClash-specific claims). Added the
+"Architecture status: BUILT vs PLANNED" and "Known gaps" sections above,
+corrected the engine-classification and session-7-conventions passages to
+explicitly say PLANNED/RESOLVED rather than reading as established,
+updated "Exact next step" and "What's next" to make the determinism
+foundation the actual next step ahead of matchmaking, updated `GAMES.md`
+similarly, and created `CLAUDE.md` at the repo root with the four
+standing rules the user specified (code is the source of truth over
+docs; grep before assuming a feature exists; every `PROGRESS.md` claim
+states its verification method; new claims default to PLANNED). Did not
+delete any historical narrative — corrections were added inline as
+`RESOLVED`/superseded markers, per explicit instruction to preserve
+original intent.
+
 ## Decisions / tradeoffs (read before changing structure)
 
 - **On this machine, Vite's default (no `server.host` set) resolved
@@ -719,8 +882,14 @@ resolved, until they say so.** One commit.
   (spawner + falling objects + playfield collision, even though it's a
   dodge/survival game rather than a match-3 puzzle — the technical pattern
   of "things fall from the top of a vertical playfield" is what the engine
-  category is about, not the win condition). If the user's actual external
-  design doc classifies these differently, defer to that and relabel.
+  category is about, not the win condition).
+  **RESOLVED 2026-07-30: the user confirmed the registry is correct — the
+  three games are genuinely mechanically different, not reskins of one
+  engine.** Separately from the labels being correct, though: no two of
+  the 3 built games have ever shared an engine cluster (see "Architecture
+  status" above), so the underlying shared-engine/reskin model itself is
+  still completely untested — that's a different question from whether
+  the labels are right, and the labels being right doesn't answer it.
 - **Theme is its own package (`packages/theme`), not `packages/client/src/theme`.**
   Reason: game modules under `/games/<name>/` need the theme too, and they
   must not depend on `packages/client` (client's future game-loader will
@@ -824,23 +993,34 @@ resolved, until they say so.** One commit.
 
 ## What's next
 
-**Current priority — shared systems (see "Current phase" above):**
+**Current priority — see "Architecture status" and "Exact next step"
+above for full detail; summary below. This numbered list is now stale in
+its ordering (item 0 supersedes item 2's old priority) — kept for
+history rather than renumbered/deleted:**
 
+0. **(Added session 10, actually first) Build the determinism
+   foundation** — seeded RNG, fixed-timestep loop, `inputLog`, retrofit
+   all 3 existing games to use all three. Confirmed by the user as the
+   real next step, ahead of matchmaking. See "Exact next step" above for
+   the full detail on scope and what's already greenlit vs. still an
+   engineering judgment call.
 1. ~~Auth & profile~~ ✅ built AND verified end-to-end against the real
    Supabase database session 8 — signup/login/logout/profile all
    confirmed working via direct API calls and through the actual browser
-   UI. Two test accounts (`testplayer1`, `browsertest`) exist in the real
-   DB from verification; left in place, harmless.
-2. Matchmaking, real-time sync, and wallet — not started. Build order
-   within these wasn't specified yet; ask before assuming.
-3. Once built, validate the systems against **one existing game** (not
-   yet chosen which — Neon Runner is the simplest candidate) before
-   assuming the approach generalizes to the other 48 unbuilt + 3 built
-   games, per the user's explicit instruction.
-4. Games-building resumes after systems work (or interleaved — confirm
-   with the user rather than assuming which). 3/51 done, 48 remain, 2
-   open questions from session 7 (retrofit scope, seeded-RNG/inputLog
-   design) still unanswered — don't guess at them.
+   UI. Two test accounts (`testplayer1`, `browsertest`) existed in the
+   real DB from verification; deleted session 9 — table confirmed empty.
+2. Matchmaking, real-time sync, and wallet — not started, and now
+   explicitly AFTER item 0 above, not next. Build order among these three
+   wasn't specified; ask before assuming.
+3. Once matchmaking/etc. are built, validate against **one existing
+   game** (not yet chosen which — Neon Runner is the simplest candidate)
+   before assuming the approach generalizes to the other 48 unbuilt + 3
+   built games, per the user's explicit instruction.
+4. Games-building (48/51 remaining) resumes after systems work (or
+   interleaved — confirm with the user rather than assuming which).
+   Session 7's Q1 (file-layout convention retrofit — `skin.ts`/
+   `README.md`) is still genuinely unanswered, distinct from item 0's
+   determinism retrofit above — don't conflate them, don't guess at Q1.
 5. Homepage direction (session 2's violet/gold redesign) is still pending
    the user's explicit visual confirmation — propagating the `Navbar` +
    `.ac-card` style to other pages stays paused until then.
