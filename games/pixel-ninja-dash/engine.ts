@@ -30,7 +30,7 @@ export class DashEngine {
 
   elapsed = 0;
   distance = 0;
-  speed = WORLD.baseSpeed;
+  speed: number = WORLD.baseSpeed;
 
   stumbleRemainingMs = 0;
   dashFlashRemainingMs = 0;

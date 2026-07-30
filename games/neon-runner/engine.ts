@@ -30,7 +30,7 @@ export class RunnerEngine {
 
   elapsed = 0;
   distance = 0;
-  speed = WORLD.initialSpeed;
+  speed: number = WORLD.initialSpeed;
 
   playerY = 0;
   velocityY = 0;

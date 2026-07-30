@@ -30,7 +30,7 @@ export class DodgeEngine {
   height = 0;
 
   elapsed = 0;
-  fallSpeed = WORLD.baseFallSpeed;
+  fallSpeed: number = WORLD.baseFallSpeed;
 
   playerX = 0;
   playerMovingLeft = false;
