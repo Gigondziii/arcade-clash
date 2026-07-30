@@ -3,7 +3,7 @@
 Self-contained handoff doc. Read this first at the start of every session —
 conversations don't carry over, and work may resume from a different tool.
 
-## Status summary — read this first (updated 2026-07-30, end of session 8)
+## Status summary — read this first (updated 2026-07-30, end of session 9)
 
 Written for someone with zero memory of anything below. Everything else in
 this file is historical detail/audit trail — this section is the map.
@@ -41,6 +41,28 @@ this file is historical detail/audit trail — this section is the map.
 - **Monorepo scaffold, workspace wiring, Express/Drizzle/Postgres setup.**
   Verification: code inspection + successful builds/installs + the auth
   verification above (which exercises the whole server stack).
+- **Git history contains no committed credential.** Verification: ran
+  `git log -p --all -S 'supabase.co'` and `git log --all --name-only
+  --diff-filter=A | grep -i '\.env$'` at the user's explicit request and
+  read the raw output — not an assumption from `.gitignore` looking
+  correct now. Clean: the only history match is this file's own
+  descriptive prose in a commit message; no `.env` has ever been added.
+
+### Fixed this session, verification is PARTIAL — user hasn't confirmed yet
+
+- **Vite dev server was reachable by my own tooling but refused
+  connections from the user's actual browser** (`ERR_CONNECTION_REFUSED`
+  on `http://localhost:5173`). Root cause: Vite's default bound
+  `[::1]:5173` (IPv6 loopback) only — confirmed via `netstat` showing no
+  IPv4 entry at all. Fixed with `server: { host: true }` in
+  `packages/client/vite.config.ts`; `netstat` now shows both `0.0.0.0` and
+  `[::]` bound. **What's verified:** the fix compiles, the server starts,
+  `netstat` shows correct dual-stack binding, and my own Browser-pane tool
+  loads the page with zero console errors. **What's NOT verified:** the
+  user has not yet said whether their own browser can actually reach it
+  now — don't assume this is resolved until they confirm. If they report
+  it's still broken, the IPv6-binding theory may be wrong or incomplete
+  (check Windows Firewall, antivirus, or a proxy next).
 
 ### Half-done, with the exact seam
 
@@ -77,15 +99,20 @@ this file is historical detail/audit trail — this section is the map.
 
 ### Exact next step for the next session
 
-Build **matchmaking** (the user explicitly said this, and explicitly said
-NOT to start it this session). Two things to confirm before writing code,
-not assume: (1) which existing game to validate the approach against —
-Neon Runner is the simplest candidate but wasn't confirmed, and (2)
-whether "matchmaking" this session means just the queue/pairing data
-model and UI, or also the real-time sync layer that was grouped alongside
-it — the user listed "auth, matchmaking, real-time sync, wallet" as four
-things without saying whether matchmaking-the-session includes sync or
-sync is its own later session.
+**First, before anything else:** confirm whether the user's browser can
+now actually reach `http://localhost:5173` after the IPv6-binding fix
+above. If a fresh session starts and this was never confirmed, ask —
+don't assume it's resolved and don't assume it's still broken either.
+
+Then, build **matchmaking** (the user explicitly said this, and
+explicitly said NOT to start it this session). Two things to confirm
+before writing code, not assume: (1) which existing game to validate the
+approach against — Neon Runner is the simplest candidate but wasn't
+confirmed, and (2) whether "matchmaking" this session means just the
+queue/pairing data model and UI, or also the real-time sync layer that
+was grouped alongside it — the user listed "auth, matchmaking, real-time
+sync, wallet" as four things without saying whether matchmaking-the-
+session includes sync or sync is its own later session.
 
 ### Noticed but deliberately not touched
 
@@ -587,6 +614,21 @@ against a real database:**
    history. Rewrote this file's opening into the "Status summary" section
    above per the user's explicit ask for a from-scratch-reader-friendly
    status doc, separate from the session-by-session log below it.
+
+### Session 9 (2026-07-30) — dev server unreachable, fixed, unconfirmed
+
+User reported `http://localhost:5173` gave `ERR_CONNECTION_REFUSED` in
+their actual browser, despite the server running and reachable through my
+own tooling. Diagnosed via `netstat`: Vite's default had bound only
+`[::1]:5173` (IPv6 loopback), no IPv4 entry at all — the user's browser
+likely tried `127.0.0.1` first and found nothing listening. Fixed with
+`server: { host: true }` in `packages/client/vite.config.ts`, restarted
+properly (PowerShell process kill, not `pkill` — see that decision
+below), confirmed via `netstat` that both `0.0.0.0` and `[::]` are now
+bound, and confirmed the page still loads with zero console errors
+through my own tooling. **The user has not yet confirmed their own
+browser can reach it post-fix — treat this as fixed-but-unconfirmed, not
+resolved, until they say so.** One commit.
 
 ## Decisions / tradeoffs (read before changing structure)
 
