@@ -3,6 +3,114 @@
 Self-contained handoff doc. Read this first at the start of every session —
 conversations don't carry over, and work may resume from a different tool.
 
+## Status summary — read this first (updated 2026-07-30, end of session 8)
+
+Written for someone with zero memory of anything below. Everything else in
+this file is historical detail/audit trail — this section is the map.
+
+### Done and verified (method noted — don't assume "built" means "confirmed")
+
+- **Auth (signup/login/logout/session persistence/profile page).**
+  Verification: highest confidence in the project. Checked TWO ways —
+  direct API calls with real assertions (signup returns 201 with a real
+  user row; `/me` returns 200 with a session cookie and 401 without;
+  logout returns 204 and actually invalidates the session; login accepts
+  the right password and rejects the wrong one) AND a full manual
+  browser click-through (signup modal → navbar avatar updates → Profile
+  page shows real username/join-date/stats → Log out → navbar and
+  Profile page both revert correctly) — against the real production
+  Supabase database, not a mock or local stand-in. Zero console errors.
+  Two leftover test accounts (`testplayer1`, `browsertest`) were deleted
+  from the real DB at the end of this session — table is empty now.
+- **GameModule loader + GameLoader host** (mount/pause/quit/`gameOver`/
+  results-screen/replay/exit). Verification: manual browser click-through,
+  for all 3 built games, each time. Not automated — re-verify by hand if
+  this plumbing changes.
+- **3 games' engine logic** (Neon Runner, Pixel Ninja Dash, Sky Dodge —
+  physics, collision, scoring, difficulty curves). Verification:
+  standalone `npx tsx` scripts with real pass/fail assertions, run outside
+  the browser entirely. This caught two real bugs before they shipped
+  (see session 6, session 8 entries). Deterministic and re-runnable.
+- **3 games' DOM/lifecycle wiring** (mount, pause, gameOver dispatch,
+  cleanup). Verification: manual browser click-through, same as the
+  loader above.
+- **Type-checking passes** (`tsc -b` client, `tsc --noEmit` server).
+  Verification: actually ran the compiler and read its output — not an
+  assumption from Vite/tsx running without visible errors (which don't
+  type-check at all, discovered this session). Both clean as of now.
+- **Monorepo scaffold, workspace wiring, Express/Drizzle/Postgres setup.**
+  Verification: code inspection + successful builds/installs + the auth
+  verification above (which exercises the whole server stack).
+
+### Half-done, with the exact seam
+
+- **Homepage visual direction (violet/gold redesign).** Built and
+  DOM/computed-style-inspected (colors, radii, etc. match spec exactly),
+  but **no one has ever visually confirmed it in an actual rendered
+  view** — the screenshot tool doesn't work in this sandbox (see the rAF/
+  compositing decision further down), so "looks right" has never been
+  checked by a human. Seam: open `http://localhost:5173` yourself and
+  actually look at it. Nothing downstream has been blocked on this, but
+  it's also never been signed off.
+- **Games: 3 of 51 built** (Neon Runner/runner, Pixel Ninja Dash/reflex-
+  timing, Sky Dodge/falling-block). Seam: 48 remain, across racer/
+  arena-shooter/physics-table/turn-based-board/word-trivia (untouched)
+  plus more runner/reflex-timing/falling-block reskins. Two questions
+  from session 7 (retrofit the 3 existing games to a new file-layout
+  convention? confirm a proposed seeded-RNG/inputLog/fixed-timestep
+  design?) are still unanswered — don't guess, ask again if they matter
+  before the next game gets built.
+- **Backend: only auth exists.** `packages/server/src/routes/` has
+  exactly one file, `auth.ts`. No matchmaking, wallet, real-time sync, or
+  leaderboard routes/tables/anything. Seam: this is a from-scratch build
+  for each of those, not an extension of existing code.
+- **No client-side router.** `App.tsx` reaches the one extra page
+  (Profile) via a hand-rolled `view` state, not `react-router-dom`. Seam:
+  this will need to become a real router the moment a second real page
+  (matchmaking lobby, wallet, leaderboard) shows up — it wasn't built
+  now because there was only one extra page to reach.
+- **`avatarUrl` and `gamesPlayed`/`gamesWon` columns exist but are
+  inert.** `avatarUrl` is always null (client generates a placeholder
+  avatar instead); `gamesPlayed`/`gamesWon` default to 0 and nothing
+  anywhere increments them yet, because no match has ever been played.
+  Seam: these become real the moment matches produce results to write.
+
+### Exact next step for the next session
+
+Build **matchmaking** (the user explicitly said this, and explicitly said
+NOT to start it this session). Two things to confirm before writing code,
+not assume: (1) which existing game to validate the approach against —
+Neon Runner is the simplest candidate but wasn't confirmed, and (2)
+whether "matchmaking" this session means just the queue/pairing data
+model and UI, or also the real-time sync layer that was grouped alongside
+it — the user listed "auth, matchmaking, real-time sync, wallet" as four
+things without saying whether matchmaking-the-session includes sync or
+sync is its own later session.
+
+### Noticed but deliberately not touched
+
+- **No rate limiting on `/api/auth/login` or `/signup`.** Nothing stops
+  repeated password-guessing attempts right now. Not added because it
+  wasn't asked for and the right approach (in-memory vs. a shared store)
+  depends on decisions not yet made — flagging so it isn't forgotten
+  before this app has real users/stakes.
+- **No CSRF token** — relying solely on the session cookie's `sameSite:
+  lax` attribute, which helps but isn't complete CSRF protection. Same
+  reasoning as above: not asked for, worth a deliberate look before money
+  is involved.
+- **`npm audit` reports 5 vulnerabilities (4 moderate, 1 high)**, all in
+  `drizzle-kit`'s dev-only bundled `esbuild`/`esbuild-kit` dependency
+  chain — not the runtime/production dependency tree. Did not run
+  `npm audit fix --force` since that can introduce breaking changes and
+  these don't ship to production; worth a deliberate look, not urgent.
+- **JWT sessions have no revocation/blocklist and a 7-day expiry** with no
+  refresh-token rotation. Deliberately simple for a practice-only phase —
+  flagged repeatedly in this file as a pre-wallet-phase security revisit.
+- **Supabase's dashboard pasted an "Install Agent Skills" suggestion**
+  (`npx skills add supabase/agent-skills`) alongside the connection
+  string the user gave — this read as generic Supabase UI copy, not a
+  deliberate ask, so it was never run.
+
 ## Project summary
 
 Hub of short (60–180s) head-to-head arcade mini-games. Solo practice, or
@@ -468,6 +576,17 @@ against a real database:**
    is genuinely done, not just wired.
 7. Four commits: games type-fix, shared `PublicUser` type, server auth
    build, client auth build.
+8. **Session close-out:** deleted the `testplayer1`/`browsertest` test
+   accounts from the real database (table confirmed empty after). Ran a
+   git-history audit at the user's request — `git log -p --all -S
+   'supabase.co'` and `git log --all --name-only --diff-filter=A | grep
+   -i '\.env$'` — to check whether any credential had ever been committed,
+   not just whether `.gitignore` covers it now. Result: clean. The only
+   history match for "supabase.co" is descriptive prose in this file's own
+   commit message; no `.env` file has ever been added in this repo's
+   history. Rewrote this file's opening into the "Status summary" section
+   above per the user's explicit ask for a from-scratch-reader-friendly
+   status doc, separate from the session-by-session log below it.
 
 ## Decisions / tradeoffs (read before changing structure)
 
@@ -687,8 +806,12 @@ npm run dev -w packages/client   # http://localhost:5173 (frontend)
 npm run dev -w packages/server   # http://localhost:4000 (backend API)
 ```
 
-Server needs `packages/server/.env` (copy from `.env.example`) with a real
-`DATABASE_URL` — see "Immediate" above if it's still a placeholder.
+Server needs `packages/server/.env` with a real `DATABASE_URL` — this is
+already set up and working as of session 8 (a real Supabase database),
+should not need touching again unless the credential changes.
+**If you restart the server, don't use `pkill` (see the decision above on
+why) — use PowerShell's `Get-CimInstance`/`Stop-Process`, and confirm via
+`netstat` that the new process actually holds port 4000.**
 
 Check `git log --oneline` for the checkpoint history if you need more detail
 than this file provides.
