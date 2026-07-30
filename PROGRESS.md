@@ -24,29 +24,38 @@ Board, Reflex-Timing, Word/Trivia), then faster reskins for the rest.
 
 Repo root: `C:\Users\abuse\arcadeclash`
 
-## Current phase: games-building (solo/practice only)
+## Current phase: shared-systems-building (session 8+)
 
-**As of 2026-07-29 (session 3), this is a dedicated games-building phase.**
-Goal: implement and fully test all 51 mini-games from the (external) design
+**Superseded as of 2026-07-29 (session 8) — read this before trusting
+anything below in this section that says auth/systems are "out of
+scope."** The user explicitly pivoted: they're now building the shared
+systems (auth, matchmaking, real-time sync, wallet) that every game will
+eventually plug into, validating each against one existing game (not yet
+chosen which) before assuming it generalizes to the rest. Games-building
+isn't abandoned — 3/51 built, 48 remain — just paused while systems work
+happens. **Auth & profile is done as of session 8** (see the session log
+below); matchmaking, wallet, and real-time sync have NOT been started —
+still genuinely future work, not a stale warning this time.
+
+### Original games-building phase (sessions 3-7, for history)
+
+As of session 3, this was a dedicated games-building phase. Goal:
+implement and fully test all 51 mini-games from the (external) design
 doc — one at a time, or by engine cluster where it makes sense — each
 running solo in practice mode through the GameModule loader. No opponent,
 no real-time sync, no backend systems beyond what a single-player game
 needs client-side.
 
-**Explicitly out of scope until the user says otherwise. Do not build,
-stub further, or suggest building any of these — even if a game's spec
-describes multiplayer/opponent behavior, skip or no-op that part and ship
-only the solo/practice version:**
-- Auth & user profiles
-- Matchmaking (practice/for-fun/for-stakes queue)
-- Wallet / stakes / escrow system
-- Leaderboards
-- Real-time opponent sync (WebSocket match state, etc.)
+**Explicitly out of scope during sessions 3-7 (NO LONGER TRUE for auth as
+of session 8 — see above):**
+- ~~Auth & user profiles~~ **done, session 8** — see the session log below
+- Matchmaking (practice/for-fun/for-stakes queue) — still not started
+- Wallet / stakes / escrow system — still not started
+- Leaderboards — still not started
+- Real-time opponent sync (WebSocket match state, etc.) — still not started
 
-These are deliberately deferred to a separate phase **after** all 51 games
-are built and tested individually — not forgotten, not an oversight. If a
-fresh agent reads this cold: do not "helpfully" start scaffolding any of
-the five items above during this phase, even partially.
+This list described the original games-first sequencing. It no longer
+reflects current priority — read "Current phase" above first.
 
 **Status correction (resolved in session 4):** at the start of this phase
 the GameModule loader didn't exist yet, despite earlier being referred to
@@ -121,14 +130,21 @@ arcadeclash/
 │   ├── client/                # Vite + React + TS app
 │   │   └── src/
 │   │       ├── main.tsx       # imports @arcadeclash/theme/theme.css once, globally
-│   │       ├── App.tsx        # renders HomePage
-│   │       ├── lib/format.ts  # formatPlays(), engineLabel() display helpers
+│   │       ├── App.tsx        # view state ('home'|'profile') + active-game overlay, wraps AuthProvider
+│   │       ├── lib/{format,api}.ts   # display helpers + fetch wrapper (credentials included)
+│   │       ├── auth/AuthContext.tsx  # user/loading/signUp/logIn/logOut, checks /api/auth/me on mount
 │   │       ├── mock/homeData.ts   # PLACEHOLDER data — see "Decisions" below
-│   │       ├── components/    # Navbar, Hero, TrendingArena, GameCard, StarRating, icons
+│   │       ├── components/    # Navbar (auth-aware), Hero, TrendingArena, GameCard, Avatar, AuthModal, StarRating, icons
 │   │       ├── game-loader/   # GameLoader.tsx (host chrome + results screen), gameFactories.ts
-│   │       └── pages/HomePage.tsx
-│   ├── server/                 # PLACEHOLDER — package.json + empty src/index.ts, no deps yet
-│   ├── shared/                 # package.json + src/gameModule.ts (GameModule interface) + index.ts
+│   │       └── pages/{HomePage,ProfilePage}.tsx
+│   ├── server/                 # Express 5 + Drizzle + Postgres — real as of session 8
+│   │   ├── drizzle.config.ts  # drizzle-kit migration config
+│   │   └── src/
+│   │       ├── index.ts       # app entry: cors/cookie-parser/json, mounts authRouter, global error handler
+│   │       ├── auth/          # jwt.ts, password.ts (bcryptjs), middleware.ts (attachSession/requireAuth)
+│   │       ├── db/            # schema.ts (users table), client.ts (pg Pool + drizzle)
+│   │       └── routes/auth.ts # signup/login/logout/me
+│   ├── shared/                 # package.json + src/{gameModule,user}.ts (GameModule interface, PublicUser) + index.ts
 │   └── theme/                  # design system package — see below
 │       └── src/
 │           ├── theme.css       # :root CSS custom properties + .ac-* base classes
@@ -343,8 +359,130 @@ and whether the proposed RNG/inputLog/fixed-timestep design (new
 fixed-timestep accumulator loops) matches what the user actually wants.
 Both unanswered as of this entry — resolve before building game 4.
 
+### Session 8 (2026-07-30) — Auth & profile (first shared system)
+
+Status check confirmed (read this file + `GAMES.md`, verified against
+disk — accurate). Then the phase pivot described above: build the shared
+systems, starting with auth & profile only this session, stopping before
+matchmaking/wallet/real-time sync. Scope: user model, signup/login/logout/
+session persistence, profile page, navbar wiring, Postgres schema.
+
+**Checked the machine first: no Docker, no local Postgres.** Asked the
+user how to provision one — they chose a free cloud Postgres, and to
+paste the connection string directly in chat (it's a local dev secret,
+low risk, they were given the option to create the `.env` themselves
+instead and declined). **As of this entry, the DB URL hasn't arrived yet
+— `packages/server/.env`'s `DATABASE_URL` is still a placeholder
+(`REPLACE_ME_WITH_REAL_CONNECTION_STRING`), so no migration has been run
+and no real signup/login has actually persisted a user.** Everything
+below this line was verified as far as possible without a live DB (see
+"Decisions" for exactly how) — resolve `DATABASE_URL` and run
+`npm run db:generate && npm run db:migrate -w packages/server` before
+trusting auth as actually working end-to-end.
+
+**Built:**
+1. `packages/server`, real for the first time (was an empty placeholder):
+   Express 5, `users` table via Drizzle ORM + `pg` (node-postgres driver),
+   `drizzle-kit` for migrations. Auth routes: `POST /api/auth/signup`,
+   `/login`, `/logout`, `GET /api/auth/me`. JWT in an httpOnly cookie
+   (`ac_session`, 7-day expiry) — see decisions below for why over a
+   session store. Passwords hashed with `bcryptjs`.
+2. `packages/shared/src/user.ts` — `PublicUser` type (never includes
+   `passwordHash`), the client/server-shared response shape.
+3. Client: `AuthContext` (checks `/api/auth/me` on mount, exposes
+   `signUp`/`logIn`/`logOut`), `AuthModal` (signup/login toggle form),
+   `Avatar` (generated initial + color hashed from username, reusing the
+   theme's existing `categoryColors` rather than inventing new tokens),
+   `ProfilePage` (username, avatar, games-played/win-rate — real fields
+   from the DB, just zero/`—` for a brand-new user, not fabricated mock
+   numbers). `Navbar` now shows the avatar + a Profile/Log out dropdown
+   when logged in, Log in/Sign up pills when not. `App.tsx` gained a
+   `view: 'home' | 'profile'` state to reach the profile page — no router
+   added yet (see decisions).
+4. **Found and fixed a real bug unrelated to auth**: `tsc -b`/`tsc --noEmit`
+   had apparently never been run against this codebase before (Vite/esbuild
+   and `tsx` only transform, they don't type-check) — running it surfaced
+   a genuine latent bug in all 3 built games (a field initialized from an
+   `as const` constant infers that constant's literal type, breaking a
+   later computed reassignment) plus several issues in the new server code
+   (see decisions). All fixed; `tsc -b` (client) and `tsc --noEmit`
+   (server) are both clean now. **This codebase had never been fully
+   type-checked before this session — worth doing periodically going
+   forward, not just relying on Vite/tsx running without errors.**
+5. **Found and fixed a real production-impact bug**: under Express 4, an
+   unhandled async rejection (simulated by the still-placeholder DB URL
+   failing to connect) crashed the entire server process — any transient
+   DB hiccup would have taken down the whole server for every user, not
+   just failed one request. Upgraded to Express 5 (forwards async handler
+   rejections to error middleware natively) plus added a global error
+   handler as a last-resort safety net. Verified: the same failure now
+   returns a clean 500 and the server keeps running.
+6. Verified everything reachable without a live DB: server boots and
+   `/api/health` responds; `/api/auth/me` correctly 401s with no cookie;
+   CORS + credentialed cross-origin cookies work between `:5173` and
+   `:4000`; the signup form submits, hits the real endpoint, and surfaces
+   the (currently expected) 500 cleanly in the UI without crashing
+   anything client or server side. The one thing NOT verified: an actual
+   successful signup/login/profile-view/logout round-trip against a real
+   database — blocked on `DATABASE_URL`.
+7. Four commits: games type-fix, shared `PublicUser` type, server auth
+   build, client auth build.
+
 ## Decisions / tradeoffs (read before changing structure)
 
+- **Auth uses a JWT in an httpOnly cookie, not a server-side session
+  store.** Reasoning: no sessions table/Redis needed at this scale, and it
+  plays cleanly with Socket.IO later — the same JWT can authenticate a
+  WebSocket handshake without a DB round-trip. Tradeoff accepted:
+  server-side "log out everywhere"/immediate revocation isn't possible
+  without extra work (a token blocklist or moving to sessions). Revisit
+  once the wallet/stakes phase raises the security stakes on accounts.
+  7-day expiry, no refresh-token rotation yet — also a revisit-later item.
+- **Password hashing: `bcryptjs`, not native `bcrypt`.** Avoids needing
+  native compilation (node-gyp/Visual Studio Build Tools) on this Windows
+  machine, which we don't know is set up, given the PATH friction already
+  hit earlier in this project.
+- **Avatars are generated client-side** (colored circle + first initial,
+  color hashed from username, reusing the theme's existing
+  `categoryColors` rather than adding new tokens) — no image storage or
+  external avatar service. `avatarUrl` exists as a nullable DB column for
+  real uploads later; unused for now.
+- **`gamesPlayed`/`gamesWon` are real DB columns (default 0), not
+  hardcoded mock numbers in the UI.** A brand-new user's profile honestly
+  shows 0 games / `—` win rate rather than fabricated stats — the columns
+  are there now so wiring in real match results later is just an UPDATE,
+  not a schema migration.
+- **No client-side router yet.** `App.tsx` uses a simple `view` state
+  (`'home' | 'profile'`) to reach the profile page, same pattern as the
+  existing game-session overlay. A real router (`react-router-dom`) is a
+  near-term need once matchmaking/wallet/leaderboard pages exist too —
+  don't be surprised if that's the very next infra addition.
+- **This was the first time `tsc -b`/`tsc --noEmit` had been run against
+  this codebase for real type-checking.** Vite (esbuild) and `tsx` only
+  transform TypeScript — they strip types and run, they don't check them.
+  Running a real compile surfaced genuine pre-existing bugs: a literal-
+  type inference issue in all 3 games (fixed, see the games type-fix
+  commit) and several server-specific issues on the way (see below).
+  **Lesson for future sessions: periodically run a real type-check across
+  the whole repo, not just Vite/tsx running without visible errors** —
+  the latter only proves the code parses and executes the paths actually
+  exercised, not that it type-checks.
+- **`packages/server`'s `tsconfig.json` used to override to `NodeNext`
+  module resolution**, which requires explicit `.js` extensions on every
+  relative import (a well-known TS+ESM quirk) — but the package is
+  actually run via `tsx`, which resolves more like a bundler and doesn't
+  care about extensions, so this override didn't match the real dev
+  workflow and just added friction. Removed the override; server now
+  inherits `Bundler` resolution from `tsconfig.base.json` like every other
+  package in the monorepo. If a real compiled build (`tsc` → `node
+  dist/`) is ever wanted instead of running via `tsx` in production too,
+  this decision should be revisited.
+- **Upgraded `express` 4→5.** An unhandled async rejection in a route
+  handler crashes the whole Node process under Express 4 (it doesn't
+  forward rejected promises to error-handling middleware); Express 5 does
+  this natively. Discovered via a real DB-connection failure during
+  testing — this wasn't a hypothetical, it reproduced immediately. Kept a
+  global `app.use(errorHandler)` too as a last-resort safety net.
 - **Engine classification (`GameEngine` value in `games/registry.ts`) is
   my judgment call per game, not something the user's specs state
   explicitly.** Each spec has a "Genre" field ("Runner / Reflex" for all
@@ -461,33 +599,30 @@ Both unanswered as of this entry — resolve before building game 4.
 
 ## What's next
 
-**Current priority (games-building phase, see above):**
+**Immediate (blocking, session 8):** get a real `DATABASE_URL` from the
+user (they're setting up a free cloud Postgres), write it into
+`packages/server/.env`, run `npm run db:generate -w packages/server` then
+`npm run db:migrate -w packages/server`, restart the server, and verify an
+actual signup → login → view profile → logout round-trip against the
+real database. Only then is auth actually "done," not just wired.
 
-1. ~~Build the GameModule loader~~ ✅ done session 4 (`packages/shared` +
-   `packages/client/src/game-loader/`).
-2. Build and test the remaining 50 games one at a time / by engine cluster,
-   each solo/practice-only, plugging into the loader. The user feeds specs
-   from an external design doc one at a time — this file won't have the
-   spec content, only what's actually been built. Update the "Games built"
-   table above as each one lands. For each new game: verify pure game
-   logic via `npx tsx` (see the sandbox-limitation decision above), verify
-   DOM/lifecycle wiring by hand in the Browser pane, add it to
-   `games/registry.ts` + `games/package.json`'s exports map +
-   `gameFactories.ts`, and make it clickable from somewhere on the
-   homepage/trending grid so it's actually reachable for testing.
-3. Homepage direction (session 2's violet/gold redesign) is still pending
+**Current priority — shared systems (see "Current phase" above):**
+
+1. ~~Auth & profile~~ ✅ built session 8, pending the DB-verification step
+   directly above.
+2. Matchmaking, real-time sync, and wallet — not started. Build order
+   within these wasn't specified yet; ask before assuming.
+3. Once built, validate the systems against **one existing game** (not
+   yet chosen which — Neon Runner is the simplest candidate) before
+   assuming the approach generalizes to the other 48 unbuilt + 3 built
+   games, per the user's explicit instruction.
+4. Games-building resumes after systems work (or interleaved — confirm
+   with the user rather than assuming which). 3/51 done, 48 remain, 2
+   open questions from session 7 (retrofit scope, seeded-RNG/inputLog
+   design) still unanswered — don't guess at them.
+5. Homepage direction (session 2's violet/gold redesign) is still pending
    the user's explicit visual confirmation — propagating the `Navbar` +
-   `.ac-card` style to other pages stays paused until then, independent of
-   the games work above.
-
-**Deferred until all 51 games are built and tested (do not start early —
-see "Current phase" above for the full list and rationale):**
-
-- Auth & profile (username, avatar, stats)
-- Matchmaking queue (practice/for-fun/for-stakes + escrow data model)
-- Wallet system (play-money balance, placeholder deposit/withdraw UI)
-- Leaderboards (per-game + global)
-- Real-time opponent sync
+   `.ac-card` style to other pages stays paused until then.
 
 The homepage's "LIVE ARENA" player count and "View Leaderboards →" link
 stay mock/dead until matchmaking and leaderboards are eventually built.
@@ -498,8 +633,12 @@ stay mock/dead until matchmaking and leaderboards are eventually built.
 cd C:/Users/abuse/arcadeclash
 # PowerShell only, until PATH is fixed:
 $env:Path = "C:\Program Files\nodejs;" + $env:Path
-npm run dev -w packages/client   # http://localhost:5173
+npm run dev -w packages/client   # http://localhost:5173 (frontend)
+npm run dev -w packages/server   # http://localhost:4000 (backend API)
 ```
+
+Server needs `packages/server/.env` (copy from `.env.example`) with a real
+`DATABASE_URL` — see "Immediate" above if it's still a placeholder.
 
 Check `git log --oneline` for the checkpoint history if you need more detail
 than this file provides.
