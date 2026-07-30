@@ -5,12 +5,13 @@ import TrendingArena from '../components/TrendingArena'
 type HomePageProps = {
   onPlayGame: (id: string, title: string) => void
   loadingGameId: string | null
+  onNavigateProfile: () => void
 }
 
-export default function HomePage({ onPlayGame, loadingGameId }: HomePageProps) {
+export default function HomePage({ onPlayGame, loadingGameId, onNavigateProfile }: HomePageProps) {
   return (
     <>
-      <Navbar />
+      <Navbar onNavigateHome={() => {}} onNavigateProfile={onNavigateProfile} />
       <main style={{ maxWidth: 1400, margin: '0 auto' }}>
         <Hero />
         <TrendingArena onPlayGame={onPlayGame} loadingGameId={loadingGameId} />
