@@ -590,6 +590,16 @@ against a real database:**
 
 ## Decisions / tradeoffs (read before changing structure)
 
+- **On this machine, Vite's default (no `server.host` set) resolved
+  "localhost" to IPv6-only (`::1`)** — `netstat` showed only a
+  `[::1]:5173` entry, no IPv4 one. The user's real browser tried the
+  IPv4 loopback first and got `ERR_CONNECTION_REFUSED`, even though the
+  dev server was genuinely running and I could reach it fine through the
+  Browser-pane tool (which apparently resolves/connects differently).
+  Fixed with `server: { host: true }` in `vite.config.ts`, which binds
+  both `0.0.0.0` and `[::]` — confirmed via `netstat` afterward. If a
+  fresh agent hits "server is running but the user says the page won't
+  load," check this first before assuming the server crashed.
 - **On this machine, `pkill -f "tsx watch"` (from the Bash tool/git-bash)
   does not reliably kill the server's node process.** Discovered when a
   stale process from an earlier restart silently kept holding port 4000
