@@ -35,10 +35,6 @@ three. Confirmed by the user, ahead of matchmaking. Full brief, with
 everything that session needs and nothing it doesn't, is the very next
 section below.
 
-**Also unconfirmed:** whether the user's own browser can reach
-`http://localhost:5173` after a session 9 fix (Vite was binding IPv6-only
-on this machine). Ask if this is still unconfirmed when a session starts.
-
 Everything past the next section is historical detail, decisions, and the
 session-by-session log — unchanged, just relocated below the summary so
 this file costs less context to read at the start of every session. Skim
@@ -216,7 +212,7 @@ this file is historical detail/audit trail — this section is the map.
   correct now. Clean: the only history match is this file's own
   descriptive prose in a commit message; no `.env` has ever been added.
 
-### Fixed session 9, verification is PARTIAL — user hasn't confirmed yet
+### Fixed session 9, CONFIRMED session 12 — dev server is reachable
 
 - **Vite dev server was reachable by my own tooling but refused
   connections from the user's actual browser** (`ERR_CONNECTION_REFUSED`
@@ -224,13 +220,22 @@ this file is historical detail/audit trail — this section is the map.
   `[::1]:5173` (IPv6 loopback) only — confirmed via `netstat` showing no
   IPv4 entry at all. Fixed with `server: { host: true }` in
   `packages/client/vite.config.ts`; `netstat` now shows both `0.0.0.0` and
-  `[::]` bound. **What's verified:** the fix compiles, the server starts,
-  `netstat` shows correct dual-stack binding, and my own Browser-pane tool
-  loads the page with zero console errors. **What's NOT verified:** the
-  user has not yet said whether their own browser can actually reach it
-  now — don't assume this is resolved until they confirm. If they report
-  it's still broken, the IPv6-binding theory may be wrong or incomplete
-  (check Windows Firewall, antivirus, or a proxy next).
+  `[::]` bound. **Verified two ways now:** (1) the fix itself — compiles,
+  server starts, `netstat` shows correct dual-stack binding, my own
+  Browser-pane tool loads the page with zero console errors; (2) the
+  thing that actually mattered — **the user confirmed in their own
+  browser, session 12, that it now loads.** Both parts of this are done;
+  don't reopen unless something changes (e.g. a future Vite/dependency
+  update resets `server.host`).
+- **Session 12 wrinkle: the immediate cause that day wasn't a new
+  IPv6 issue at all — the client dev server simply wasn't running.**
+  `netstat` showed nothing on `:5173` before I started it. Checked for
+  stale processes first (none found), started fresh via the Browser-pane
+  tool's `preview_start`, confirmed dual-stack binding again, then the
+  user confirmed it worked. The IPv6 fix from session 9 is still in
+  place and still the right fix for that specific failure mode — this
+  was just a reminder that "won't load" can have more than one cause,
+  and checking whether the process is even running is step one.
 
 ### Half-done, with the exact seam
 
@@ -886,7 +891,7 @@ against a real database:**
    above per the user's explicit ask for a from-scratch-reader-friendly
    status doc, separate from the session-by-session log below it.
 
-### Session 9 (2026-07-30) — dev server unreachable, fixed, unconfirmed
+### Session 9 (2026-07-30) — dev server unreachable, fixed, confirmed session 12
 
 User reported `http://localhost:5173` gave `ERR_CONNECTION_REFUSED` in
 their actual browser, despite the server running and reachable through my
@@ -897,9 +902,11 @@ likely tried `127.0.0.1` first and found nothing listening. Fixed with
 properly (PowerShell process kill, not `pkill` — see that decision
 below), confirmed via `netstat` that both `0.0.0.0` and `[::]` are now
 bound, and confirmed the page still loads with zero console errors
-through my own tooling. **The user has not yet confirmed their own
-browser can reach it post-fix — treat this as fixed-but-unconfirmed, not
-resolved, until they say so.** One commit.
+through my own tooling. One commit.
+
+**Update, session 12: the user confirmed their own browser can now reach
+it — see the session 12 entry below.** This sat as fixed-but-unconfirmed
+for two sessions; it's fully resolved now, not just fixed-by-tooling.
 
 ### Session 10 (2026-07-30) — read-only audit, then doc cleanup
 
@@ -968,6 +975,28 @@ quietly built something) — added an explicit line confirming they're
 still PLANNED after this session too. No contradictions found between
 the new top summary and the detailed sections below. See the top of this
 file for the full "what was fixed" list if this section is trimmed later.
+
+### Session 12 (2026-07-30) — dev-server unreachable again, different cause, now confirmed working
+
+User asked for a link to `PROGRESS.md`, then reported `localhost` still
+didn't work in their browser. Checked `netstat` first: the client dev
+server wasn't running at all (`:5173` had no listener) — the API server
+on `:4000` was still up. This is a different immediate cause than session
+9's IPv6-binding issue (which is still fixed and still in place, confirmed
+via the dual-stack binding once the server restarted). Checked for stale
+`node`/`vite` processes via PowerShell first (none found — clean), started
+the client dev server via the Browser-pane tool's `preview_start`,
+confirmed `netstat` showed both `0.0.0.0:5173` and `[::]:5173` bound, and
+confirmed zero console errors on load. **The user then confirmed in their
+own browser that it works now.** This is the first time this specific
+item — "does the user's own browser reach the app" — has an actual
+user-confirmed yes behind it, not just tooling-side verification. Updated
+the session 9 entry and the "Detailed status" section above to reflect
+this; removed the now-resolved "also unconfirmed" line from the 60-second
+summary at the top (a resolved item doesn't need to occupy space in a
+section meant to be a minimal, current-state snapshot — the resolution is
+recorded here and in the amended session 9 entry instead). No code
+changes this session, one commit for the doc update.
 
 ## Decisions / tradeoffs (read before changing structure)
 
