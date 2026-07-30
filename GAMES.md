@@ -19,12 +19,18 @@ audit this file's wording was corrected against.
 reflects each game's assigned `engine` field in `games/registry.ts` — that
 part is BUILT, a real field with a real distinct value per game,
 confirmed correct by the user against their design doc on 2026-07-30. But
-the underlying idea of an *engine* as reusable shared code across games
-is PLANNED, not built: each of the 3 games above has its own fully
-independent `engine.ts` with zero shared code between them (verified by
-reading all 3 files and grepping every import — none of the three ever
-import from another game or from a common module; each only imports its
-own local `./constants` and, for the module wiring, `@arcadeclash/shared`).
+the underlying idea of an *engine* as reusable shared **simulation**
+code across games is still PLANNED, not built: each of the 3 games above
+has its own fully independent `engine.ts` state/physics/scoring logic —
+`RunnerEngine`, `DashEngine`, `DodgeEngine` share zero simulation code
+(verified by reading all 3 files). As of session 13 (2026-07-30) this is
+no longer "zero shared code" in the absolute sense, though: all 3 games'
+`engine.ts` and `index.ts` now import real shared infrastructure from
+`@arcadeclash/shared` — seeded RNG (`rng.ts`) and a fixed-timestep loop
+(`fixedTimestepLoop.ts`), the first genuine cross-game code sharing in
+this repo. That's scheduling/randomness infrastructure, not game logic —
+it doesn't move this repo any closer to a validated shared-*engine*
+model, see below.
 
 **No two built games have ever shared an engine cluster, so the reskin/
 shared-engine abstraction is completely untested.** Building game #4 in

@@ -9,94 +9,218 @@ conversations don't carry over, and work may resume from a different tool.
 cloud-hosted) server, npm workspaces monorepo (`packages/client`,
 `packages/server`, `packages/shared`, `packages/theme`, `games/*`).
 
-**BUILT (verified in code and/or browser — see "Architecture status"
-further down for the full audit):** auth — signup/login/logout/session/
-profile — verified via direct API calls AND full browser click-through
-against the real Supabase database; 3 of 51 practice-mode mini-games
-(Neon Runner, Pixel Ninja Dash, Sky Dodge), each with fully independent
-engine code (zero sharing between them); the `GameModule` interface
-(`init(container, mode, opponentSocket)` / `start` / `pause` / `destroy`,
-`GameOverPayload = { score, reason, durationMs }` — no `seed`, no
-`inputLog`); the `GameLoader` host chrome; homepage (colors/layout
-verified via DOM inspection, but never visually confirmed by the user in
-an actual live view — still an open seam, not a blocker).
+**BUILT AND VERIFIED (method noted for each — see "Architecture status"
+further down for the full audit):**
+- Auth (signup/login/logout/session/profile) — verified via direct API
+  calls with real assertions AND a full manual browser click-through,
+  both against the real Supabase database.
+- 3 of 51 practice-mode mini-games (Neon Runner, Pixel Ninja Dash, Sky
+  Dodge) — engine logic verified via standalone `npx tsx` scripts;
+  DOM/lifecycle (mount/pause/resume/quit/`gameOver`/results/Play Again)
+  verified by hand in-browser, zero console errors.
+- The determinism foundation — seeded RNG (`packages/shared/src/rng.ts`),
+  a fixed-timestep loop (`packages/shared/src/fixedTimestepLoop.ts`,
+  genuinely shared by and imported from all 3 games — the first real
+  cross-game shared code in this repo), and `inputLog` recording
+  (`{ tick, action, wallMs? }`) — verified by `scripts/
+  determinism-check.ts`, 17 automated assertions, all passing: same seed
+  + same inputLog replayed twice ⇒ identical final state for all 3 games;
+  the shared loop driven through a fake clock with jittery vs. smooth
+  timing (incl. a simulated 400ms stall) also reaches identical final
+  state; replay is unaffected by stripping or randomizing every `wallMs`
+  value. Also verified by a manual negative test (one gameplay call
+  temporarily de-seeded, confirmed the script fails, reverted) and a
+  browser click-through of all 3 games' full lifecycle, zero console
+  errors.
+- `GameModule` interface + `GameLoader` host chrome — verified by the
+  same browser click-through as above, all 3 games.
+- Homepage — colors/layout verified via DOM/computed-style inspection
+  only, see "still unverified" below.
 
-**PLANNED (described somewhere in this file or in conversation, NOT in
-code — confirmed absent by a 2026-07-30 read-only audit, grepped and
-read directly):** seeded RNG, `inputLog`, a fixed-timestep update loop, a
-real shared-engine abstraction (each game's `engine.ts` is fully
-independent — no two games have ever shared a cluster), the 8-engine
-cluster model as a tested abstraction, matchmaking, wallet, real-time
-sync, leaderboards.
+**STILL UNVERIFIED (built, but confirmation is incomplete — don't assume
+these work just because the code looks right):**
+- **Live rAF-driven gameplay (actual real-time score progression,
+  animation, collisions) has never been observed working** — this
+  Browser-pane tool's tab reports `document.hidden = true` (confirmed via
+  a raw rAF-counter probe that never fired), so `requestAnimationFrame`
+  never runs here at all. This is a pre-existing sandbox limitation
+  (documented since session 4), not new to the determinism work, but it
+  means the fixed-timestep loop's real in-browser behavior has only ever
+  been exercised by the injectable-clock automated test, never by an
+  actual human playing. **The user should confirm real gameplay feel
+  themselves at `localhost:5173` before trusting this further.**
+- **`wallMs` has only been confirmed to (a) populate and (b) not affect
+  replay** — both via automated test / trivial instant-click browser
+  interaction. It has never captured a *meaningful* real-world gap
+  (an actual multi-second pause-and-think), because no real gameplay
+  session has run long enough to produce one in this sandbox. The field
+  works structurally; whether it captures the sizes/patterns useful for
+  a future exploit-detector is unverified.
+- **RNG re-derivation-on-`reset()` idempotency (session 13's fix for the
+  "reset() might fire twice" structural gap) has been verified by reading
+  the code, not by a test that actually calls `reset()` twice on one
+  engine instance and checks the second call restarts the same sequence.**
+  Every current caller (the acceptance test, `GameModule.start()`) only
+  ever calls `reset()` once per instance in practice, so the idempotency
+  claim is logically sound (unconditional re-derivation, verified by
+  reading `reset()`'s implementation in all 3 engines) but has zero direct
+  test coverage of the actual "call it twice" case.
+- **`sky-dodge`'s pointer-drag movement path was not re-exercised in
+  browser this session** (session 13's click-through tested ArrowLeft/
+  Space only) — the drag code itself wasn't touched, only logging was
+  added around it, so risk is low, but it hasn't been re-confirmed
+  working since the loop refactor.
+- Homepage visual direction — still never visually confirmed by the user
+  in an actual rendered view (long-standing, unrelated to this work).
 
-**EXACT NEXT STEP:** build the determinism foundation — seeded RNG,
-fixed-timestep loop, `inputLog`, retrofit all 3 existing games to use all
-three. Confirmed by the user, ahead of matchmaking. Full brief, with
-everything that session needs and nothing it doesn't, is the very next
-section below.
+**NOTICED BUT DELIBERATELY NOT TOUCHED:** see "Known gaps" further down —
+the drag/anti-cheat gap, the freeze-frame/time-dilation exploit (`wallMs`
+is captured but nothing validates it), and the async-vs-live-sync
+matchmaking model choice are all real, flagged gaps left for the
+matchmaking session (see the brief immediately below) or later,
+deliberately not fixed now. Also still standing from earlier sessions:
+no rate limiting on auth endpoints, no CSRF token, JWT has no
+revocation/refresh-rotation, session 7's file-layout-convention question
+(Q1) is still unanswered.
+
+**EXACT NEXT STEP:** matchmaking, for-fun only (no wallet/stakes). Full
+self-contained brief immediately below — read it before starting.
 
 Everything past the next section is historical detail, decisions, and the
 session-by-session log — unchanged, just relocated below the summary so
 this file costs less context to read at the start of every session. Skim
 it only for the "why" behind something; it's not required to get oriented.
 
-## NEXT SESSION: DETERMINISM FOUNDATION
+## NEXT SESSION: MATCHMAKING (for-fun only)
 
 Everything this session needs to start cold, with zero prior context.
-**Scope:** seeded RNG, fixed-timestep loop, `inputLog`, retrofit all 3
-existing games (Neon Runner, Pixel Ninja Dash, Sky Dodge) to use all
-three. **Matchmaking does not start this session — it comes after.**
+**Scope:** matchmaking for **for-fun matches only** — no wallet, no
+stakes/escrow, no real money, none of that infrastructure. The
+determinism foundation (seeded RNG, fixed-timestep loop, `inputLog`) is
+done — sessions 13-14 — specifically so matches can be fair and
+(eventually) verifiable; this session is the first thing that actually
+uses it for more than one player.
 
 ### Decisions already made — do not re-litigate these
 
-- **Retrofit all 3 existing games.** YES, confirmed.
-- **Build seeded RNG + fixed-timestep loop + `inputLog`.** YES, confirmed.
-- **Two separate RNG streams, gameplay and cosmetic, both derived from
-  one seed.** YES, confirmed. (This resolves the question raised by
-  session 10's audit about whether cosmetic-particle randomness needs
-  seeding too — it does, but as its own stream, so cosmetic-only
-  variation doesn't perturb the gameplay-affecting sequence or vice
-  versa. See the full `Math.random()` site list below for which sites go
-  in which stream.)
-- **Matchmaking comes after this, not before.** Confirmed explicitly,
-  twice now (sessions 10 and 11 — session 9 was an unrelated dev-server
-  fix, not a matchmaking-sequencing decision; don't cite it as one).
+- **Matchmaking comes after the determinism foundation, not before.**
+  Confirmed repeatedly (sessions 10, 11) and now starting, with
+  determinism done.
+- **This session's matchmaking is for-fun only.** Confirmed explicitly.
+  Wallet/stakes/escrow are a separate, later phase — don't build toward
+  them opportunistically "since you're in here."
+- Beyond that: **nothing about matchmaking's actual design has been
+  decided** — not which game(s) support it first, not lobby/queue UI, not
+  the client-server protocol. Don't guess at any of it; ask.
 
-### The one open question this session should answer before coding
+### The one open question this session must answer before building
 
-**Should `inputLog` entries be keyed on `{ timestamp, action }` or
-`{ tick, action }`?** Not yet decided — don't silently pick one without
-flagging it. `timestamp` (wall-clock ms) is simpler to record but less
-naturally tied to a fixed-timestep replay; `tick` (a frame-counter
-integer) ties directly to the fixed-timestep loop and is likely what
-actually enables exact replay, but depends on the loop existing first to
-define what a "tick" is.
+**Async-independent-rounds vs. live-wall-clock-synchronized rounds** —
+raised in "Known gaps" (session 14), not yet decided, and this session's
+architecture depends entirely on the answer:
 
-### Two small cleanups queued for this session (found during the doc audit, not yet done)
+- **Async:** each player plays their own full round independently
+  (possibly at different real times), submits `(seed, inputLog, score)`
+  to the server, the server validates by replaying, scores are compared
+  afterward. Fits what's already built with zero further engineering —
+  round length is already tick-native in all 3 games (session 13), so
+  two players' rounds are automatically comparable without any live
+  synchronization. Weaker "arcade head-to-head" feel — players aren't
+  playing at the same moment.
+- **Live-synchronized:** a shared real-time session — players see each
+  other, a shared countdown, genuine simultaneous head-to-head. Not
+  designed at all. Raises real unsolved questions this session would have
+  to answer: what happens when one player's tick count falls behind
+  another's after a stall (see the freeze-frame/time-dilation gap below —
+  this is exactly where it bites), what the WebSocket protocol looks
+  like, whether `Socket.IO` (already a stack decision, never used yet) is
+  the transport.
+- Noted in Known Gaps: a future Arena Shooter engine cluster likely
+  *needs* the live model eventually, so whichever gets picked for this
+  session's for-fun matchmaking may not generalize to every future game —
+  that's fine to defer, just don't assume today's choice is final for all
+  8 engines.
 
-- `games/sky-dodge/engine.ts`: remove the dead `playerMovingLeft` /
-  `playerMovingRight` fields on `DodgeEngine` — declared, never read or
-  written anywhere in the class.
-- `games/pixel-ninja-dash/engine.ts`: `dashFlashRemainingMs = 180` inside
-  `pressDash()` is a magic number, unlike every other tunable, which
-  lives in `constants.ts`'s `WORLD`/`TIMING`/`SCORE` objects. Move it
-  there for consistency.
+### Seed generation currently happens client-side and must move server-side
+
+**Verbatim, `packages/client/src/game-loader/GameLoader.tsx`'s `mount()`:**
+
+```ts
+function mount() {
+  const container = containerRef.current
+  if (!container) return
+  const mod = createModule()
+  moduleRef.current = mod
+  mod.addEventListener('gameOver', ((e: Event) => {
+    setResult((e as CustomEvent<GameOverPayload>).detail)
+  }) as EventListener)
+  // A fresh seed per mount (including Play Again, which remounts via a new
+  // module instance) — this is the host picking an arbitrary starting
+  // point for one run, not gameplay-affecting randomness, so it doesn't
+  // go through the seeded gameplay/cosmetic streams inside the engine.
+  const seed = Math.floor(Math.random() * 0x100000000)
+  mod.init(container, 'practice', null, seed)
+  mod.start()
+}
+```
+
+This was fine for solo practice — there's no opponent and nothing to
+cheat against. **It cannot stay client-side once a match involves another
+player or a verifiable result**, for two reasons: (1) if fairness
+requires both players to see the same seed (certainly true for a
+live-synchronized model, arguably true even for async if "same obstacle
+sequence for both" matters to the match's fairness story), only a neutral
+third party — the server — can hand out a seed neither client controls;
+(2) even in an async model with per-player seeds, a client that generates
+its *own* seed can trivially cheat the honesty of "one run per seed" —
+nothing stops it from re-rolling locally until it finds an easy seed
+*before* ever starting the run it eventually submits. A server-issued
+seed, generated and handed out only once a match/run is created, removes
+that degree of freedom. This session should add a server endpoint that
+issues the seed, and stop `GameLoader.tsx` from generating its own.
 
 ### Exact current state of the code this session will touch
 
-**The `GameModule` interface, verbatim, `packages/shared/src/gameModule.ts`:**
+**The `GameModule` interface + `InputLogEntry`, verbatim,
+`packages/shared/src/gameModule.ts`:**
 
 ```ts
+// Standard interface every mini-game plugs into. "match" mode is accepted
+// for forward compatibility but isn't implemented during the games-only
+// phase — modules should log and fall back to practice-like behavior if
+// they receive it (see PROGRESS.md "Current phase").
 export type GameMode = "practice" | "match";
+
+// One recorded input transition, tagged with the fixed-timestep tick it
+// occurred on (not wall-clock time — see PROGRESS.md's determinism brief
+// for why tick is the correct key: replay steps ticks, not real time).
+export type InputLogEntry = {
+  tick: number;
+  action: string;
+  // Real elapsed wall-clock ms since run start, captured at record time.
+  // EVIDENCE ONLY — tick stays the sole authoritative replay key, and
+  // nothing in the simulation or in replay may ever read this field (see
+  // scripts/determinism-check.ts's wallMs-invariance test, which asserts
+  // replay produces identical state with these values stripped or
+  // randomized). Exists to make freeze-frame/time-dilation stalling
+  // detectable later — a stalled player's real inputLog will show large
+  // gaps between consecutive wallMs values relative to their tick deltas,
+  // even though tick-keyed replay alone can't see it. Optional so
+  // hand-authored or synthetic logs (tests, tooling) aren't required to
+  // fabricate a wall-clock trace they don't have.
+  wallMs?: number;
+};
 
 export type GameOverPayload = {
   score: number;
   reason: string;
   durationMs: number;
+  seed: number;
+  inputLog: InputLogEntry[];
 };
 
 export interface GameModule extends EventTarget {
-  init(container: HTMLElement, mode: GameMode, opponentSocket: WebSocket | null): void;
+  init(container: HTMLElement, mode: GameMode, opponentSocket: WebSocket | null, seed: number): void;
   start(): void;
   pause(): void;
   destroy(): void;
@@ -105,63 +229,31 @@ export interface GameModule extends EventTarget {
 export type GameModuleFactory = () => GameModule;
 ```
 
-No `seed` parameter, no `inputLog`/`meta` field — this session adds them.
+Note `mode: GameMode` already has `"match"` as a value and `init()`
+already takes an `opponentSocket: WebSocket | null` parameter — both were
+added for forward compatibility back when the interface was first defined
+(session 4) and have never been used for anything real. `"match"` mode
+currently only triggers a `console.warn` fallback to practice-like
+behavior in all 3 games — this session is what would actually implement
+it, not just accept the parameter.
 
-**The current variable-dt loop — identical shape in all 3 games'
-`index.ts` (`neon-runner` shown below; `pixel-ninja-dash` and `sky-dodge`
-match exactly except for which input flags get reset each frame):**
+**`packages/server/src/routes/` has exactly one file, `auth.ts`.** No
+matchmaking routes, tables, or Socket.IO wiring exist anywhere — this is
+a from-scratch build, not an extension of existing server code.
 
-```ts
-private loop = () => {
-  if (this.state !== "running") return;
-  const now = performance.now();
-  const dt = Math.min(0.05, (now - this.lastFrameTime) / 1000);
-  this.lastFrameTime = now;
+**No client-side router.** `App.tsx` reaches its one extra page (Profile)
+via a hand-rolled `view: 'home' | 'profile'` state, not
+`react-router-dom`. A matchmaking lobby is a second real page beyond
+Profile — this is plausibly the point where a real router actually
+becomes necessary (flagged repeatedly in this file already).
 
-  const result = this.engine.update(dt, this.input);
-  this.input.jumpPressed = false;
-  this.input.jumpReleased = false;
-  this.input.slidePressed = false;
-
-  if (this.ctx) this.engine.draw(this.ctx);
-  if (this.hud) this.hud.textContent = `SCORE ${this.engine.score}`;
-
-  if (result === "collision") {
-    this.endRun("collision");
-    return;
-  }
-
-  this.rafId = requestAnimationFrame(this.loop);
-};
-```
-
-Line references: `neon-runner/index.ts:233-252`;
-`pixel-ninja-dash/index.ts:196-219`; `sky-dodge/index.ts:222-246` — same
-`dt` calculation, same `requestAnimationFrame(this.loop)` tail, different
-result-handling and input-reset lines per game.
-
-**Every `Math.random()` call site across the 3 games, labeled
-gameplay-affecting or cosmetic-only (17 total — grepped 2026-07-30):**
-
-`games/neon-runner/engine.ts`:
-- L106-108 (inside `spawnParticles()`: `vx`, `vy`, `life`) — **cosmetic-only**
-- L144 (`spawnTimerMs = spawnIntervalMs + Math.random() * 300`) — **gameplay-affecting** (obstacle spawn timing)
-- L145 (`type = Math.random() < 0.5 ? "hurdle" : "overhang"`) — **gameplay-affecting** (obstacle type)
-
-`games/pixel-ninja-dash/engine.ts`:
-- L95 (`d += WORLD.obstacleSpacingMin + Math.random() * (...)`) — **gameplay-affecting** (course layout, pre-generated once in `reset()`)
-- L109-111 (inside particle spawn: `vx`, `vy`, `life`) — **cosmetic-only**
-
-`games/sky-dodge/engine.ts`:
-- L84-86 (inside particle spawn: `vx`, `vy`, `life`) — **cosmetic-only**
-- L93 (hazard `size`) — **gameplay-affecting** (hitbox size)
-- L94 (hazard `shape`: block/shard) — **gameplay-affecting** (hitbox shape)
-- L95 (hazard `x` position) — **gameplay-affecting** (spawn position)
-- L114 (`Math.random() < 0.5` gating a movement-trail particle spawn) — **cosmetic-only** (just thins out the visual trail)
-- L136 (`spawnTimerSec = intervalSec + Math.random() * 0.15`) — **gameplay-affecting** (hazard spawn timing)
-
-**Tally: 7 gameplay-affecting, 10 cosmetic-only.** Every one of these
-needs to move to one of the two seeded RNG streams decided above.
+**Relevant Known Gaps this session should be aware of, not necessarily
+fix:** `sky-dodge`'s pointer-drag input isn't replay-verifiable (matters
+if `sky-dodge` is one of the games matchmaking supports); the freeze-frame/
+time-dilation exploit has no validator yet (matters more for a
+live-synchronized model than async, since async at least bounds the
+"planning window" to before a score is submitted). See "Known gaps"
+further down for full detail on both.
 
 ---
 
@@ -211,6 +303,25 @@ this file is historical detail/audit trail — this section is the map.
   read the raw output — not an assumption from `.gitignore` looking
   correct now. Clean: the only history match is this file's own
   descriptive prose in a commit message; no `.env` has ever been added.
+- **Determinism foundation (seeded RNG, fixed-timestep loop, `inputLog`
+  incl. `wallMs`), sessions 13-14.** Verification: `scripts/
+  determinism-check.ts`, 17 automated pass/fail assertions covering (a)
+  same seed + same inputLog replayed twice ⇒ identical state, all 3
+  games, (b) the real `createFixedTimestepLoop` driven through smooth vs.
+  jittery (incl. a 400ms stall) fake clocks ⇒ identical state, (c)
+  replay is unaffected by stripping/randomizing every `wallMs` value.
+  Also a manual negative test (temporarily de-seeded one gameplay call,
+  confirmed the script correctly fails, reverted) proving the test can
+  actually catch a regression, not just always pass. `tsc -b`/
+  `tsc --noEmit` clean, `oxlint` clean. Browser click-through of all 3
+  games' full lifecycle (mount/countdown/pause/resume/quit/`gameOver`/
+  results/Play Again), zero console errors — **live rAF-driven score
+  progression itself was NOT observable** (this Browser-pane tab reports
+  `document.hidden = true`, confirmed via a raw rAF probe, so
+  `requestAnimationFrame` never fires here — pre-existing sandbox
+  limitation, not new). See session 13/14 log entries for full detail,
+  every design decision and why, and the exact list of what's still
+  unverified (60-second summary above).
 
 ### Fixed session 9, CONFIRMED session 12 — dev server is reachable
 
@@ -304,7 +415,7 @@ docs got ahead of the code once already (see below). Read this section
 before trusting any older passage that describes something as already
 working.
 
-### BUILT (verified by reading the actual code, 2026-07-30)
+### BUILT (verified by reading the actual code; last confirmed 2026-07-30, session 13)
 
 **The `GameModule` interface, copied verbatim from
 `packages/shared/src/gameModule.ts`:**
@@ -312,14 +423,22 @@ working.
 ```ts
 export type GameMode = "practice" | "match";
 
+export type InputLogEntry = {
+  tick: number;
+  action: string;
+  wallMs?: number; // evidence only, session 14 — never read by replay
+};
+
 export type GameOverPayload = {
   score: number;
   reason: string;
   durationMs: number;
+  seed: number;
+  inputLog: InputLogEntry[];
 };
 
 export interface GameModule extends EventTarget {
-  init(container: HTMLElement, mode: GameMode, opponentSocket: WebSocket | null): void;
+  init(container: HTMLElement, mode: GameMode, opponentSocket: WebSocket | null, seed: number): void;
   start(): void;
   pause(): void;
   destroy(): void;
@@ -328,10 +447,10 @@ export interface GameModule extends EventTarget {
 export type GameModuleFactory = () => GameModule;
 ```
 
-`reason` and `durationMs` are real — every game's `GameOverPayload`
-construction was grepped and matches this shape exactly. There is no
-`seed` parameter in `init()` anywhere, in the interface or in any game.
-There is no `inputLog` or `meta` field in `GameOverPayload` anywhere.
+`reason` and `durationMs` are still real and unchanged from before;
+`seed`/`inputLog` are new as of session 13, both grepped and confirmed
+present in all 3 games' `GameOverPayload` construction and `init()`
+signature.
 
 - Auth (signup/login/logout/session/profile) — verified via direct API
   calls + full browser click-through against the real Supabase DB.
@@ -339,35 +458,61 @@ There is no `inputLog` or `meta` field in `GameOverPayload` anywhere.
   implementing the interface above — engine logic verified via standalone
   `tsx` scripts, DOM/lifecycle verified by hand in-browser.
 - `GameModule` loader + `GameLoader` host chrome.
+- **Seeded RNG** (`packages/shared/src/rng.ts`): `mulberry32`,
+  `createSeededRandom(seed).stream(label)` deriving independent
+  gameplay/cosmetic streams from one root seed. Every one of the 17
+  `Math.random()` call sites tallied in session 12's audit is now routed
+  through `this.gameplayRng()` or `this.cosmeticRng()`, grepped
+  afterward to confirm zero `Math.random()` remains anywhere in `games/`.
+  Verified by `scripts/determinism-check.ts` (same seed replayed twice
+  ⇒ identical state) and by a manual negative test (temporarily reverted
+  one call to `Math.random()`, confirmed the script fails, reverted back).
+- **Fixed-timestep loop** (`packages/shared/src/fixedTimestepLoop.ts`,
+  `createFixedTimestepLoop`): a real accumulator loop imported by and
+  shared across all 3 games — the first genuine cross-game shared code in
+  this repo (previously every game's logic, simulation AND scheduling,
+  was fully independent; now the scheduling/tick layer is shared, the
+  simulation layer — each game's own `engine.ts` state/physics/scoring —
+  is still fully independent, see PLANNED below). Verified by
+  `scripts/determinism-check.ts`'s loop-jitter test: the same engine
+  driven through the real loop under a smooth 16.67ms clock vs. a jittery
+  clock (including a simulated 400ms stall) reaches bit-identical final
+  state. Stall-clamp policy: a single frame clamps to at most 5 catch-up
+  ticks, excess real time is dropped rather than queued for later frames
+  — verified this doesn't cause a freeze (single 5-second stall test) and
+  is safe for replay determinism specifically because replay steps ticks
+  from the recorded log, never re-runs this accumulator against real
+  time (see session 13 log for the full reasoning).
+- **`inputLog`** (`{ tick, action, wallMs? }`, keyed on simulation tick,
+  not wall-clock time — see session 13 log for why tick is correct).
+  Recorded as edge transitions (press/release, or held-key down/up) in
+  all 3 games' `index.ts`, tagged with the fixed-timestep loop's current
+  tick at the moment of the real DOM event. `wallMs` (session 14, real
+  elapsed ms since run start) rides alongside as evidence only — `tick`
+  remains the sole authoritative replay key, and `scripts/
+  determinism-check.ts`'s Test 3 asserts replay is bit-for-bit unaffected
+  by stripping or randomizing every `wallMs` value, not just that the
+  replay code happens not to reference it today. Nothing yet validates
+  `wallMs` against expected pacing — see "Known gaps" (time-dilation/
+  freeze-frame exploit). `sky-dodge`'s pointer-drag movement
+  (`dragTargetX`) is deliberately excluded from `inputLog` entirely — see
+  "Known gaps" (drag/anti-cheat gap) below.
 - `games/registry.ts`'s `engine` field values (`runner`, `reflex-timing`,
   `falling-block`) — real, distinct values in real code. (Whether this
-  represents a *validated* shared-engine model is a separate question —
-  see PLANNED below. The field existing and being distinct is BUILT; the
-  abstraction it implies is not.)
+  represents a *validated* shared-engine *simulation* model is a separate
+  question — see PLANNED below. The field existing and being distinct is
+  BUILT; that abstraction is not.)
 - Monorepo scaffold, theme/design system, Express/Drizzle/Postgres server.
 
 ### PLANNED (verified absent — grepped/read the whole repo, none of this exists)
 
-- **Seeded RNG.** No `createSeededRandom`/seeded-PRNG utility exists
-  anywhere in the repo. All 3 games use raw `Math.random()` for
-  gameplay-affecting randomness (obstacle spawns, timing, positions), not
-  just cosmetic particles. (Full call-site list now in "NEXT SESSION:
-  DETERMINISM FOUNDATION" at the top of this file.)
-- **`inputLog`.** Does not exist anywhere. No game records
-  `{ timestamp, action }` or anything resembling it.
-- **Fixed-timestep update loop.** All 3 games use a variable-timestep
-  loop (`dt = Math.min(0.05, (now - lastFrameTime) / 1000)`), not a
-  fixed-timestep accumulator.
-- **`seed` parameter in `GameModule.init()`.** Not in the interface, not
-  in any game. Real signature: `init(container, mode, opponentSocket)`.
-- **`seed`/`inputLog` fields in `GameOverPayload`.** Not present. Real
-  shape: `{ score, reason, durationMs }`.
-- **Shared engine abstraction.** Each of the 3 games has a fully
-  independent `engine.ts`; zero code is shared between them — every
-  import in every game's `engine.ts`/`index.ts` resolves to that game's
-  own local files or `@arcadeclash/shared`, never another game. What
-  looks shared is structural convention (similar class shapes, method
-  names) applied by hand each time, not an actual abstraction.
+- **Shared engine *simulation* abstraction.** Each of the 3 games'
+  `engine.ts` still has fully independent state/physics/scoring logic;
+  zero simulation code is shared between them (`RunnerEngine`,
+  `DashEngine`, `DodgeEngine` remain 3 separate classes). This is
+  distinct from the RNG/fixed-timestep-loop *infrastructure* sharing
+  that session 13 added (see BUILT above) — infrastructure sharing is
+  real now; simulation-logic sharing across an engine cluster is not.
 - **The 8-engine cluster model, as a validated abstraction.** 3 of 8
   engine labels are used, each by exactly one game. **No two built games
   have ever shared an engine cluster — the "one representative game per
@@ -379,12 +524,6 @@ There is no `inputLog` or `meta` field in `GameOverPayload` anywhere.
   `README.md`, theme-sourced colors) — proposed session 7, never adopted
   by any of the 3 built games, never confirmed by the user.
 - Matchmaking, wallet, real-time sync, leaderboards — not started.
-
-**Status as of session 11 (this doc-restructure session): seeded RNG,
-fixed-timestep, and `inputLog` are still PLANNED, not built — this
-session was documentation-only (see session 11 log below and the
-"NEXT SESSION" brief at the top). Building them is explicitly the next
-session's job.**
 
 ## Known gaps (blockers for public deployment, NOT for localhost dev)
 
@@ -398,6 +537,59 @@ block shipping this publicly or handling real money:
 - **JWT sessions have a flat 7-day expiry, no revocation/blocklist
   mechanism, and no refresh-token rotation.** A leaked token stays valid
   for up to 7 days with no way to force a logout.
+- **`sky-dodge` runs completed via pointer-drag movement produce an
+  `inputLog` the server cannot replay-verify — an anti-cheat gap, not
+  just a missing feature.** `dragTargetX` is continuous analog input
+  (pointer position), deliberately excluded from `inputLog`/replay in
+  session 13's determinism build (scope decision, confirmed with the
+  user) because the log format only records discrete `{ tick, action }`
+  transitions. A run played entirely via arrow keys is fully
+  deterministic and replayable end-to-end; a run played (even partly) via
+  drag is not — its recorded `seed`+`inputLog` will not reproduce the
+  reported score if replayed, so a future anti-cheat verifier has no way
+  to confirm a drag-heavy run's legitimacy from the log alone. This
+  matters once matchmaking/stakes exist and a server needs to verify
+  reported scores; it doesn't matter for solo practice mode today.
+  Resolve before drag-based play is allowed in any stakes match, either
+  by adding analog-input support to the log format or by disabling drag
+  input in match mode.
+- **Time-dilation / freeze-frame exploit: stalling the sim grants
+  unlimited planning time per decision; undetectable by tick-keyed replay
+  alone.** These are reflex games — the win condition is reacting under
+  real time pressure. A player who can stall the loop at will (e.g. a
+  deliberately backgrounded tab, throttled via devtools, or some other
+  means of pausing frame delivery) freezes the screen on a rendered frame
+  and gets arbitrarily long real-world time to study it and plan the next
+  input, with zero trace in the replay: no extra ticks are granted (the
+  stall clamp drops time, never banks it — see session 13), no obstacles
+  are skipped (everything gameplay-relevant is keyed to tick count, not
+  wall-clock time), so a `(seed, inputLog)` replay of a four-hour
+  freeze-and-plan run and an honest reflex run produce byte-identical
+  logs and the same score. This converts a reaction test into a planning
+  test, undetectably, for any match where that distinction matters (i.e.
+  most of these games' whole premise). `inputLog` entries now carry an
+  optional `wallMs` (real elapsed ms since run start, session 14) as
+  evidence for this specific case, but **nothing validates it yet** — no
+  code checks wallMs gaps against expected tick-driven pacing, rejects
+  suspiciously large gaps, or does anything with the field beyond
+  recording it. Building that validator is a real, separate task for
+  whenever matchmaking/stakes make this worth exploiting.
+- **Matchmaking must explicitly choose async-independent-rounds vs.
+  live-wall-clock-synchronized rounds — fairness and exploit implications
+  differ between them, and this hasn't been decided.** Async (each player
+  plays their own full round independently to its own tick-based
+  completion, submits `(seed, inputLog, score)`, scores compared
+  afterward) fits what's built today — round length is already tick-native
+  in all 3 games (see session 13), so async comparison needs no further
+  synchronization work. Live-synchronized (a shared real-time
+  countdown/session, players visible to each other) would need explicit
+  handling of what happens when one player's tick count falls behind
+  another's at a shared wall-clock cutoff — not designed at all yet. Note
+  for later: a future Arena Shooter engine cluster likely *requires* the
+  live model (real-time head-to-head is presumably the point), so
+  whichever model gets built for matchmaking's first pass may not cover
+  all 8 engine clusters — don't assume one model generalizes to all of
+  them without checking each engine's actual spec.
 
 ## Project summary
 
@@ -998,6 +1190,238 @@ section meant to be a minimal, current-state snapshot — the resolution is
 recorded here and in the amended session 9 entry instead). No code
 changes this session, one commit for the doc update.
 
+### Session 13 (2026-07-30) — Determinism foundation: seeded RNG, fixed-timestep loop, inputLog
+
+Built the brief from "NEXT SESSION: DETERMINISM FOUNDATION" (now
+collapsed into a short pointer at the top of this file — see "DETERMINISM
+FOUNDATION — DONE" there). Started by reading `CLAUDE.md`/`PROGRESS.md`/
+`packages/shared/` cold and re-verifying every claim by reading the actual
+code (per the documentation rules from session 10) — confirmed accurate:
+no `rng.ts`, no `inputLog`, all 3 games' loops identical variable-dt
+shape, `GameOverPayload` exactly `{score, reason, durationMs}`, all 17
+`Math.random()` sites matching the prior session's list and
+classification exactly.
+
+**The one open question, answered before coding: `inputLog` keys on
+`tick`, not `timestamp`.** A fixed-timestep sim is fully determined by
+(seed, sequence of discrete ticks, which inputs were live on each tick) —
+wall-clock time isn't part of that model. Replaying a `timestamp`-keyed
+log would require converting back to a tick index at replay time
+(`floor(timestamp / stepMs)`), a lossy derivation of the one thing that's
+actually invariant. `tick` records that invariant directly.
+
+**Built, in order:**
+
+1. `packages/shared/src/rng.ts` — `mulberry32` (32-bit PRNG) and
+   `createSeededRandom(seed)`, which returns `{ stream(label) }` —
+   `.stream("gameplay")` and `.stream("cosmetic")` derive two
+   independent mulberry32 generators from one root seed via an internal
+   xmur3-style hash of `(seed, label)`, so advancing one stream can never
+   perturb the other (they're backed by separate generator state, not two
+   slices of one shared stream).
+2. `packages/shared/src/fixedTimestepLoop.ts` — `createFixedTimestepLoop`,
+   an accumulator loop with `FIXED_TIMESTEP_SEC = 1/60`. Genuinely
+   imported by and shared across all 3 games — the session's brief
+   explicitly asked to stop and report if the games turned out unable to
+   share it; they didn't need to, no forking required. `now`/`raf`/`caf`
+   are injectable, which is what makes it testable without a browser (see
+   the acceptance test below) and is also what let the user's requested
+   loop-jitter test happen at all.
+   - **Stall-clamp policy: clamp the frame delta to `maxStepsPerFrame *
+     stepSec` (5 steps ≈ 83ms) before it reaches the accumulator, then
+     drop the excess — don't carry it forward to catch up over several
+     frames.** This is the standard "Fix Your Timestep" spiral-of-death
+     guard. Verified safe specifically for this system's replay model:
+     replay steps ticks from the recorded `inputLog`, it never re-runs
+     this accumulator against real time, so whatever a stall's clamp
+     drops during a live session only affects that session's real-time
+     pacing (a brief hitch), never the reproducibility of the log it
+     produces.
+3. `packages/shared/src/gameModule.ts` — added `InputLogEntry = { tick,
+   action }`; `init()` gained a `seed: number` 4th parameter;
+   `GameOverPayload` gained `seed` and `inputLog`, kept `reason`/
+   `durationMs` (both real and useful, per the brief).
+4. All 3 games' `engine.ts` (`RunnerEngine`, `DashEngine`, `DodgeEngine`):
+   constructor now takes `seed: number`. **RNG streams are re-derived
+   inside `reset()`, not the constructor, and re-derived on every call to
+   `reset()`** — this was flagged mid-session as a structural-invariant
+   question (the user pointed out that "reset() only ever fires once in
+   practice, because `GameLoader` always destroys/recreates the module
+   for Play Again" is an unenforced assumption about caller discipline,
+   not something the engine itself guarantees). Chose re-derivation over
+   throwing on a second `reset()` call: it makes `reset()` fully
+   idempotent — any number of calls always restarts this seed's exact
+   sequence — rather than just converting a silent bug into a loud one
+   while still forbidding a legitimate future use case (restarting a run
+   without a full module teardown/recreation).
+5. All 3 games' `index.ts`: engine construction moved from a field
+   initializer into `init()` (needs the seed); the old
+   `requestAnimationFrame`-based variable-dt loop replaced with
+   `createFixedTimestepLoop`; `pause()`/`resume()` now map directly to
+   `loop.stop()`/`loop.start()`. `inputLog` recorded as edge transitions
+   (press/release, or held-key down/up for `sky-dodge`'s continuous
+   `moveLeft`/`moveRight`), tagged with `this.fixedLoop.tick` at the
+   moment of the real DOM event, only once the run has actually started.
+   `sky-dodge` previously had no key-repeat debounce guard on
+   `moveLeft`/`moveRight` (unlike `jumpKeyDown` in `neon-runner`) — added
+   one, needed for clean single-transition log entries rather than one
+   entry per OS key-repeat (~every 30-60ms while held). This also meant
+   removing `pause()`'s old defensive `input.moveLeft/moveRight = false`
+   reset: with the debounce guard in place, forcing those false on pause
+   would block a still-held key from re-arming on resume until released
+   and re-pressed (the guard would see `moveLeftKeyDown` still `true` and
+   skip re-setting `moveLeft`). Confirmed safe to just remove: the loop
+   is fully stopped while paused, so `engine.update` never reads the
+   input flags during that window regardless of their value — the only
+   moment they matter is the first tick after resume, and leaving them
+   untouched during pause makes a still-held key keep working immediately
+   on resume, which is the more correct behavior anyway.
+   `dragTargetX` (pointer-drag movement in `sky-dodge`) deliberately
+   excluded from `inputLog` — continuous analog input, out of scope for
+   this session's tick/action log format. Logged as a known anti-cheat
+   gap, not just a missing feature — see "Known gaps" above.
+6. `packages/client/src/game-loader/GameLoader.tsx`: generates a fresh
+   seed per mount (`Math.random()`-based — this is the host picking an
+   arbitrary starting point for one run, not gameplay-affecting
+   randomness, so it deliberately doesn't go through the seeded streams)
+   and passes it into `mod.init(...)`.
+7. Two queued cleanups, done in the same files while already in them:
+   removed the dead `playerMovingLeft`/`playerMovingRight` fields from
+   `sky-dodge/engine.ts` (declared, never read/written anywhere — confirmed
+   by reading the whole class before deleting); moved
+   `pixel-ninja-dash`'s `dashFlashRemainingMs = 180` magic number into
+   `constants.ts`'s `WORLD.dashFlashDurationMs`, alongside its other
+   tunables.
+
+**Cross-engine float determinism, checked per explicit ask:** grepped all
+of `games/` for `Math.sin/cos/tan/atan2/pow/exp/log` (not
+implementation-exact across JS engines) — zero matches anywhere in
+gameplay code. Only `Math.min/max/floor/ceil/round/abs` (IEEE-exact) and
+one `Math.PI` constant used inside `draw()` (rendering only, not
+simulation state) appear anywhere. Nothing to fix; not a live risk in
+this codebase.
+
+**Acceptance test: `scripts/determinism-check.ts`** (same standalone
+`npx tsx` convention as the engine-verification scripts from sessions
+4-6 — no DOM/rAF needed for the engine-replay test; the loop-jitter test
+uses the loop's injectable `now`/`raf`/`caf` instead of a real browser).
+Two tests, not one, per explicit instruction that engine-only testing
+never exercises the loop itself:
+
+1. **Engine replay** — all 3 games, same seed + same synthetic tick-tagged
+   `inputLog`, run twice, assert identical final score AND full
+   `JSON.stringify(engine)` state. All 6 assertions (3 games × score/state)
+   pass.
+2. **Loop jitter** — `RunnerEngine` driven through the real
+   `createFixedTimestepLoop` under two fake clocks (smooth ~16.67ms vs.
+   jittery `[16, 50, 8, 400, 16, 16, 33, 9, 41, 300, 16, 12, 60]`ms,
+   cycling — includes a simulated 400ms stall), same seed, same
+   `inputLog`. Stopping is done from *inside* `update()` at an exact tick
+   (mirroring how the real games stop on collision), not by checking
+   `loop.tick` from outside between frames — the first version of this
+   test did the latter and the jittery run overshot the target by 2 ticks
+   (a single burst catch-up frame can process up to 5 ticks at once,
+   crossing an externally-checked threshold mid-frame); the bug was in
+   the test's driving logic, not the loop, and is fixed now. All 5
+   assertions (tick-sequence shape × 2, score match, full state match,
+   stall-clamp bound) pass. Confirmed the scenario isn't accidentally
+   vacuous: the run does collide partway through (tick 93 of 300), but
+   several 400ms/300ms jitter stalls land before that point in real time,
+   so the comparison still meaningfully exercises live gameplay under
+   burst catch-up, not just a frozen post-collision tail.
+
+**Negative test, per explicit ask** ("if it can't fail, it isn't testing
+anything"): temporarily reverted `neon-runner/engine.ts`'s obstacle-type
+call from `this.gameplayRng()` back to `Math.random()`, reran — the
+"full state matches" assertion correctly failed (score still coincidentally
+matched; full state didn't). Reverted immediately, reran, back to all
+passing.
+
+**Type-checked** (`tsc -b` client, which covers `games`/`shared` via
+project references; `tsc --noEmit` server) — both clean. One real fix
+needed along the way: this TS version (6.x) has `erasableSyntaxOnly`
+enabled, which rejects constructor parameter-property shorthand
+(`constructor(private readonly seed: number) {}`) — rewrote as an
+explicit field + plain constructor body in all 3 engines. `oxlint` across
+`games`/`packages/shared/src`/`scripts` also clean.
+
+**Browser-verified** (all 3 games): mount → countdown → pause → resume →
+pause → quit → `gameOver` → results screen → Play Again remount, zero
+console errors throughout; `sky-dodge`'s new key-repeat debounce path
+exercised via ArrowLeft/Space key presses, no errors. **Could not verify
+live rAF-driven score progression** — confirmed via a raw rAF-counter
+probe that `document.hidden === true` in this Browser-pane tab, so
+`requestAnimationFrame` never fires here at all (a pre-existing,
+already-documented sandbox limitation from earlier sessions, re-confirmed
+rather than newly discovered). This is exactly why the loop-jitter
+acceptance test above uses an injectable fake clock instead of relying on
+real rAF — the same limitation that blocks browser verification is also
+why the automated test needed to be clock-injectable in the first place.
+The user should confirm live gameplay feel themselves at
+`localhost:5173`.
+
+No commits made this session — ask before committing, per standing
+instruction.
+
+### Session 14 (2026-07-30) — wallMs evidence field, stall-clamp follow-up analysis
+
+Follow-up to session 13, same day. User asked two analysis-only questions
+about the stall-clamp policy's implications for a future live two-player
+match (round length in ticks vs. wall-clock; whether score comparison
+needs equal tick counts) — answered without changing code (round length
+is tick-native in all 3 games today, confirmed by reading how `elapsed`
+accumulates; async score comparison doesn't need equal ticks, a future
+live-synchronized model would).
+
+**The user then identified a real gap the prior analysis missed: a
+freeze-frame/time-dilation exploit, not a lag-switch/skip-content
+exploit.** These are reflex games — stalling the sim doesn't grant extra
+ticks or skip obstacles (confirmed correct in the prior analysis), but it
+does freeze the rendered frame and hand the player unlimited real-world
+time to study it and plan, undetectably: the tick-keyed `inputLog` can't
+see the real-time gap, so a replay of a four-hour freeze-and-plan run and
+an honest one are byte-identical. This converts a reaction test into a
+planning test with zero trace in the log.
+
+**Built:** `InputLogEntry` gained an optional `wallMs?: number` field
+(`packages/shared/src/gameModule.ts`) — real elapsed ms since run start
+(`performance.now() - runStartTime`, same basis as the already-existing
+`durationMs`), captured in `logInput()` in all 3 games' `index.ts`
+alongside the existing `tick`/`action`. Confirmed before adding anything
+that `durationMs` was already true wall-clock run duration (computed via
+direct `performance.now()` calls at run start/end, independent of tick
+count) — no change needed there, the user's "if that isn't already real
+elapsed time" condition was already false.
+
+**Enforced, not just intended, that `wallMs` can't affect determinism:**
+added Test 3 to `scripts/determinism-check.ts` — replays each of the 3
+games' baseline `inputLog` with every `wallMs` value either randomized or
+stripped entirely, asserts the resulting state is bit-for-bit identical
+to the original run. All 6 new assertions pass, alongside the 11 from
+session 13 (17 total, all pass). This is deliberately a stronger claim
+than "the replay code doesn't currently read the field" — it's an
+enforced invariant that will catch a future regression if anyone
+mistakenly wires `wallMs` into replay logic later.
+
+Type-checked (`tsc -b` client, `tsc --noEmit` server) and linted
+(`oxlint`) clean. Browser-verified on Neon Runner only (key press →
+`logInput` → `wallMs` capture → pause → quit → `gameOver` dispatch with
+the new field in `inputLog`), zero console errors — didn't re-verify all
+3 games' full lifecycle again since this change is structurally identical
+and low-risk across them, and session 13 already covered the full
+lifecycle for all 3 immediately prior.
+
+Added two entries to "Known gaps" per the user's explicit request: the
+time-dilation/freeze-frame exploit itself (wallMs is captured as evidence
+but nothing validates it yet — building that validator is separate,
+future work), and the async-vs-live-synchronized matchmaking model choice
+(with a note that a future Arena Shooter cluster likely needs the live
+model, so whichever gets built first may not generalize to all 8
+engines).
+
+No commits made this session — ask before committing, per standing
+instruction.
+
 ## Decisions / tradeoffs (read before changing structure)
 
 - **On this machine, Vite's default (no `server.host` set) resolved
@@ -1198,25 +1622,22 @@ changes this session, one commit for the doc update.
 
 ## What's next
 
-**Current priority — see "NEXT SESSION: DETERMINISM FOUNDATION" at the
-top of this file for the full, self-contained brief. Summary below, kept
-for history rather than renumbered/deleted:**
-
-0. **(Added session 10, actually first) Build the determinism
-   foundation** — seeded RNG, fixed-timestep loop, `inputLog`, retrofit
-   all 3 existing games to use all three. Confirmed by the user as the
-   real next step, ahead of matchmaking. See the top of this file for the
-   full detail on scope, decisions already made, and the one open
-   question.
+0. ~~Build the determinism foundation~~ ✅ **done, session 13** — seeded
+   RNG, fixed-timestep loop (genuinely shared across all 3 games),
+   `inputLog`, all 3 games retrofitted. See "Session 13" in the log below
+   for full detail and verification.
 1. ~~Auth & profile~~ ✅ built AND verified end-to-end against the real
    Supabase database session 8 — signup/login/logout/profile all
    confirmed working via direct API calls and through the actual browser
    UI. Two test accounts (`testplayer1`, `browsertest`) existed in the
    real DB from verification; deleted in session 8's close-out — table
    confirmed empty.
-2. Matchmaking, real-time sync, and wallet — not started, and now
-   explicitly AFTER item 0 above, not next. Build order among these three
-   wasn't specified; ask before assuming.
+2. **Matchmaking, real-time sync, and wallet — not started, and now the
+   actual next priority** (determinism, item 0, was the confirmed
+   prerequisite and is done). Build order among these three wasn't
+   specified; ask before assuming. Before matchmaking depends on the
+   determinism foundation being solid, note the one open anti-cheat gap
+   in "Known gaps" above (`sky-dodge` drag input isn't replay-verifiable).
 3. Once matchmaking/etc. are built, validate against **one existing
    game** (not yet chosen which — Neon Runner is the simplest candidate)
    before assuming the approach generalizes to the other 48 unbuilt + 3
