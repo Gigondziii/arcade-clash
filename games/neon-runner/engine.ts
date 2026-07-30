@@ -1,3 +1,4 @@
+import { createSeededRandom, type RandomFn } from "@arcadeclash/shared";
 import { OBSTACLE, PALETTE, PHYSICS, PLAYER, WORLD } from "./constants";
 
 type ObstacleType = "hurdle" | "overhang";
@@ -28,6 +29,10 @@ export class RunnerEngine {
   height = 0;
   groundY = 0;
 
+  // Populated by reset() — always call reset() before using the engine.
+  private gameplayRng!: RandomFn;
+  private cosmeticRng!: RandomFn;
+
   elapsed = 0;
   distance = 0;
   speed: number = WORLD.initialSpeed;
@@ -43,6 +48,12 @@ export class RunnerEngine {
   spawnTimerMs = 0;
 
   ended = false;
+
+  private readonly seed: number;
+
+  constructor(seed: number) {
+    this.seed = seed;
+  }
 
   resize(width: number, height: number) {
     this.width = width;
@@ -63,6 +74,14 @@ export class RunnerEngine {
   }
 
   reset() {
+    // Re-derived every call (not just once in the constructor) so reset()
+    // is fully idempotent: calling it any number of times always restarts
+    // this seed's sequence from the beginning, rather than relying on
+    // callers to only ever reset an engine once.
+    const rng = createSeededRandom(this.seed);
+    this.gameplayRng = rng.stream("gameplay");
+    this.cosmeticRng = rng.stream("cosmetic");
+
     this.elapsed = 0;
     this.distance = 0;
     this.speed = WORLD.initialSpeed;
@@ -103,9 +122,9 @@ export class RunnerEngine {
       this.particles.push({
         x: this.playerX,
         y: originY,
-        vx: -this.speed * 0.3 - Math.random() * 40,
-        vy: (Math.random() - 0.5) * 120,
-        life: 0.4 + Math.random() * 0.3,
+        vx: -this.speed * 0.3 - this.cosmeticRng() * 40,
+        vy: (this.cosmeticRng() - 0.5) * 120,
+        life: 0.4 + this.cosmeticRng() * 0.3,
         color,
       });
     }
@@ -141,8 +160,8 @@ export class RunnerEngine {
     );
     this.spawnTimerMs -= dtSec * 1000;
     if (this.spawnTimerMs <= 0) {
-      this.spawnTimerMs = spawnIntervalMs + Math.random() * 300;
-      const type: ObstacleType = Math.random() < 0.5 ? "hurdle" : "overhang";
+      this.spawnTimerMs = spawnIntervalMs + this.gameplayRng() * 300;
+      const type: ObstacleType = this.gameplayRng() < 0.5 ? "hurdle" : "overhang";
       this.obstacles.push({ type, x: this.width + 40, width: type === "hurdle" ? 36 : 46 });
     }
 

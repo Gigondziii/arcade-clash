@@ -1,3 +1,4 @@
+import { createSeededRandom, type RandomFn } from "@arcadeclash/shared";
 import { PALETTE, SHIELD, WORLD } from "./constants";
 
 type HazardShape = "block" | "shard";
@@ -29,12 +30,14 @@ export class DodgeEngine {
   width = 0;
   height = 0;
 
+  // Populated by reset() — always call reset() before using the engine.
+  private gameplayRng!: RandomFn;
+  private cosmeticRng!: RandomFn;
+
   elapsed = 0;
   fallSpeed: number = WORLD.baseFallSpeed;
 
   playerX = 0;
-  playerMovingLeft = false;
-  playerMovingRight = false;
 
   shieldActive = false;
   shieldRemainingSec = 0;
@@ -45,6 +48,12 @@ export class DodgeEngine {
   particles: Particle[] = [];
 
   ended = false;
+
+  private readonly seed: number;
+
+  constructor(seed: number) {
+    this.seed = seed;
+  }
 
   resize(width: number, height: number) {
     this.width = width;
@@ -64,6 +73,14 @@ export class DodgeEngine {
   }
 
   reset() {
+    // Re-derived every call (not just once in the constructor) so reset()
+    // is fully idempotent: calling it any number of times always restarts
+    // this seed's sequence from the beginning, rather than relying on
+    // callers to only ever reset an engine once.
+    const rng = createSeededRandom(this.seed);
+    this.gameplayRng = rng.stream("gameplay");
+    this.cosmeticRng = rng.stream("cosmetic");
+
     this.elapsed = 0;
     this.fallSpeed = WORLD.baseFallSpeed;
     this.playerX = this.width / 2;
@@ -81,18 +98,18 @@ export class DodgeEngine {
       this.particles.push({
         x,
         y,
-        vx: (Math.random() - 0.5) * 160,
-        vy: (Math.random() - 0.5) * 160,
-        life: 0.3 + Math.random() * 0.25,
+        vx: (this.cosmeticRng() - 0.5) * 160,
+        vy: (this.cosmeticRng() - 0.5) * 160,
+        life: 0.3 + this.cosmeticRng() * 0.25,
         color,
       });
     }
   }
 
   private spawnHazard() {
-    const size = WORLD.hazardMinSize + Math.random() * (WORLD.hazardMaxSize - WORLD.hazardMinSize);
-    const shape: HazardShape = Math.random() < 0.5 ? "block" : "shard";
-    const x = size / 2 + Math.random() * (this.width - size);
+    const size = WORLD.hazardMinSize + this.gameplayRng() * (WORLD.hazardMaxSize - WORLD.hazardMinSize);
+    const shape: HazardShape = this.gameplayRng() < 0.5 ? "block" : "shard";
+    const x = size / 2 + this.gameplayRng() * (this.width - size);
     this.hazards.push({ x, y: -size, size, shape });
   }
 
@@ -111,7 +128,7 @@ export class DodgeEngine {
       if (input.moveRight) this.playerX += WORLD.shipMoveSpeed * dtSec;
     }
     this.playerX = Math.min(Math.max(this.playerX, WORLD.shipWidth / 2), this.width - WORLD.shipWidth / 2);
-    if (Math.abs(this.playerX - prevX) > 0.5 && Math.random() < 0.5) {
+    if (Math.abs(this.playerX - prevX) > 0.5 && this.cosmeticRng() < 0.5) {
       this.spawnParticles(1, PALETTE.cyan, this.playerX, this.shipY + WORLD.shipHeight / 2);
     }
 
@@ -133,7 +150,7 @@ export class DodgeEngine {
         WORLD.minSpawnIntervalSec,
         WORLD.baseSpawnIntervalSec - this.elapsed * WORLD.spawnIntervalRampPerSec,
       );
-      this.spawnTimerSec = intervalSec + Math.random() * 0.15;
+      this.spawnTimerSec = intervalSec + this.gameplayRng() * 0.15;
       this.spawnHazard();
     }
 

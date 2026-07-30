@@ -22,6 +22,7 @@ export const WORLD = {
   baseSpeed: 220, // units/sec — fixed pace, per spec (no difficulty ramp)
   stumbleSpeedFactor: 0.15,
   stumbleDurationMs: 550,
+  dashFlashDurationMs: 180,
   trackLength: 11000,
   raceTimeLimitSec: 60,
   obstacleSpacingMin: 320,

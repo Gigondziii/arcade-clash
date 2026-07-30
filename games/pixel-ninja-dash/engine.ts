@@ -1,3 +1,4 @@
+import { createSeededRandom, type RandomFn } from "@arcadeclash/shared";
 import { PALETTE, PLAYER, SCORE, TIMING, WORLD } from "./constants";
 
 type ObstacleResult = "perfect" | "good" | "miss";
@@ -28,6 +29,10 @@ export class DashEngine {
   height = 0;
   groundY = 0;
 
+  // Populated by reset() — always call reset() before using the engine.
+  private gameplayRng!: RandomFn;
+  private cosmeticRng!: RandomFn;
+
   elapsed = 0;
   distance = 0;
   speed: number = WORLD.baseSpeed;
@@ -44,6 +49,12 @@ export class DashEngine {
 
   ended = false;
   finished = false;
+
+  private readonly seed: number;
+
+  constructor(seed: number) {
+    this.seed = seed;
+  }
 
   resize(width: number, height: number) {
     this.width = width;
@@ -73,6 +84,14 @@ export class DashEngine {
   }
 
   reset() {
+    // Re-derived every call (not just once in the constructor) so reset()
+    // is fully idempotent: calling it any number of times always restarts
+    // this seed's sequence from the beginning, rather than relying on
+    // callers to only ever reset an engine once.
+    const rng = createSeededRandom(this.seed);
+    this.gameplayRng = rng.stream("gameplay");
+    this.cosmeticRng = rng.stream("cosmetic");
+
     this.elapsed = 0;
     this.distance = 0;
     this.speed = WORLD.baseSpeed;
@@ -92,7 +111,7 @@ export class DashEngine {
     let d = WORLD.obstacleSpacingMin;
     while (d < WORLD.trackLength - 200) {
       this.obstacles.push({ distance: d, resolved: false, result: null });
-      d += WORLD.obstacleSpacingMin + Math.random() * (WORLD.obstacleSpacingMax - WORLD.obstacleSpacingMin);
+      d += WORLD.obstacleSpacingMin + this.gameplayRng() * (WORLD.obstacleSpacingMax - WORLD.obstacleSpacingMin);
     }
   }
 
@@ -106,9 +125,9 @@ export class DashEngine {
       this.particles.push({
         x: this.playerX,
         y,
-        vx: -this.speed * 0.3 - Math.random() * 40,
-        vy: (Math.random() - 0.5) * 140,
-        life: 0.35 + Math.random() * 0.25,
+        vx: -this.speed * 0.3 - this.cosmeticRng() * 40,
+        vy: (this.cosmeticRng() - 0.5) * 140,
+        life: 0.35 + this.cosmeticRng() * 0.25,
         color,
       });
     }
@@ -121,7 +140,7 @@ export class DashEngine {
   }
 
   private pressDash() {
-    this.dashFlashRemainingMs = 180;
+    this.dashFlashRemainingMs = WORLD.dashFlashDurationMs;
     this.spawnParticles(4, PALETTE.cyan);
 
     const ob = this.currentObstacle();

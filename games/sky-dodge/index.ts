@@ -1,4 +1,12 @@
-import type { GameMode, GameModule, GameOverPayload } from "@arcadeclash/shared";
+import {
+  createFixedTimestepLoop,
+  FIXED_TIMESTEP_SEC,
+  type FixedTimestepLoop,
+  type GameMode,
+  type GameModule,
+  type GameOverPayload,
+  type InputLogEntry,
+} from "@arcadeclash/shared";
 import { PALETTE } from "./constants";
 import { DodgeEngine, type EngineInput } from "./engine";
 
@@ -17,36 +25,80 @@ export class SkyDodgeModule extends EventTarget implements GameModule {
   private countdownEl: HTMLDivElement | null = null;
   private pauseOverlay: HTMLDivElement | null = null;
 
-  private engine = new DodgeEngine();
+  // Constructed in init() once the seed is known, not as a field
+  // initializer — the engine's determinism depends on that seed.
+  private engine!: DodgeEngine;
   private resizeObserver: ResizeObserver | null = null;
 
   private state: ModuleState = "idle";
-  private rafId: number | null = null;
-  private lastFrameTime = 0;
+  private fixedLoop: FixedTimestepLoop | null = null;
   private runStartTime = 0;
   private countdownTimeoutId: ReturnType<typeof setTimeout> | null = null;
 
+  private seed = 0;
+  private inputLog: InputLogEntry[] = [];
+
   // Continuous held-state input (unlike the edge-triggered single actions in
   // the previous two games) — this game needs analog left/right movement.
+  // NOTE: dragTargetX (pointer-drag movement) is deliberately not recorded
+  // to inputLog — it's continuous analog input, not a discrete action, and
+  // is out of scope for tick/action replay this session. Runs completed via
+  // drag are still fully playable, just not server-replayable — see
+  // PROGRESS.md known gaps.
   private input: EngineInput = { moveLeft: false, moveRight: false, dragTargetX: null, shieldPressed: false };
   private dragging = false;
+  private moveLeftKeyDown = false;
+  private moveRightKeyDown = false;
+  private shieldKeyDown = false;
+
+  // Records a tick-tagged input transition for replay. Only meaningful once
+  // the run has actually started (fixedLoop exists) — input received during
+  // countdown/idle never reaches engine.update, so there's no tick to tag it
+  // with.
+  private logInput(action: string) {
+    if (!this.fixedLoop) return;
+    // wallMs is evidence only — never read by tick/action replay. See the
+    // type's doc comment in packages/shared/src/gameModule.ts.
+    this.inputLog.push({ tick: this.fixedLoop.tick, action, wallMs: performance.now() - this.runStartTime });
+  }
 
   private handleKeyDown = (e: KeyboardEvent) => {
     if (e.code === "ArrowLeft") {
       e.preventDefault();
-      this.input.moveLeft = true;
+      if (!this.moveLeftKeyDown) {
+        this.moveLeftKeyDown = true;
+        this.input.moveLeft = true;
+        this.logInput("moveLeftDown");
+      }
     } else if (e.code === "ArrowRight") {
       e.preventDefault();
-      this.input.moveRight = true;
+      if (!this.moveRightKeyDown) {
+        this.moveRightKeyDown = true;
+        this.input.moveRight = true;
+        this.logInput("moveRightDown");
+      }
     } else if (e.code === "Space") {
       e.preventDefault();
-      this.input.shieldPressed = true;
+      if (!this.shieldKeyDown) {
+        this.shieldKeyDown = true;
+        this.input.shieldPressed = true;
+        this.logInput("shieldPressed");
+      }
     }
   };
 
   private handleKeyUp = (e: KeyboardEvent) => {
-    if (e.code === "ArrowLeft") this.input.moveLeft = false;
-    else if (e.code === "ArrowRight") this.input.moveRight = false;
+    if (e.code === "ArrowLeft") {
+      this.moveLeftKeyDown = false;
+      this.input.moveLeft = false;
+      this.logInput("moveLeftUp");
+    } else if (e.code === "ArrowRight") {
+      this.moveRightKeyDown = false;
+      this.input.moveRight = false;
+      this.logInput("moveRightUp");
+    } else if (e.code === "Space") {
+      this.shieldKeyDown = false;
+    }
   };
 
   private handlePointerDown = (e: PointerEvent) => {
@@ -73,12 +125,15 @@ export class SkyDodgeModule extends EventTarget implements GameModule {
     if (document.hidden && this.state === "running") this.pause();
   };
 
-  init(container: HTMLElement, mode: GameMode, _opponentSocket: WebSocket | null): void {
+  init(container: HTMLElement, mode: GameMode, _opponentSocket: WebSocket | null, seed: number): void {
     if (mode === "match") {
       console.warn(
         "[sky-dodge] 'match' mode requested but multiplayer isn't implemented during the games-only build phase — running as practice.",
       );
     }
+
+    this.seed = seed;
+    this.engine = new DodgeEngine(seed);
 
     this.root = document.createElement("div");
     this.root.style.cssText =
@@ -169,6 +224,7 @@ export class SkyDodgeModule extends EventTarget implements GameModule {
     }
     if (this.state === "running" || this.state === "countdown") return;
     this.engine.reset();
+    this.inputLog = [];
     this.state = "countdown";
     this.runCountdown();
   }
@@ -196,38 +252,23 @@ export class SkyDodgeModule extends EventTarget implements GameModule {
   private beginRun() {
     this.state = "running";
     this.runStartTime = performance.now();
-    this.lastFrameTime = performance.now();
-    this.loop();
+    this.fixedLoop = createFixedTimestepLoop({
+      update: (tick) => this.tick(tick),
+      render: () => this.render(),
+    });
+    this.fixedLoop.start();
   }
 
-  private resume() {
-    if (this.state !== "paused") return;
-    this.state = "running";
-    this.lastFrameTime = performance.now();
-    if (this.pauseOverlay) this.pauseOverlay.style.display = "none";
-    this.loop();
-  }
-
-  pause(): void {
-    if (this.state !== "running") return;
-    this.state = "paused";
-    if (this.rafId !== null) cancelAnimationFrame(this.rafId);
-    this.rafId = null;
-    // Held movement keys shouldn't keep applying while paused/resumed later.
-    this.input.moveLeft = false;
-    this.input.moveRight = false;
-    if (this.pauseOverlay) this.pauseOverlay.style.display = "flex";
-  }
-
-  private loop = () => {
-    if (this.state !== "running") return;
-    const now = performance.now();
-    const dt = Math.min(0.05, (now - this.lastFrameTime) / 1000);
-    this.lastFrameTime = now;
-
-    const result = this.engine.update(dt, this.input);
+  private tick(_tick: number) {
+    const result = this.engine.update(FIXED_TIMESTEP_SEC, this.input);
     this.input.shieldPressed = false;
 
+    if (result === "collision") {
+      this.endRun("collision");
+    }
+  }
+
+  private render() {
     if (this.ctx) this.engine.draw(this.ctx);
     if (this.hud) {
       const shieldLabel = this.engine.shieldActive
@@ -237,32 +278,46 @@ export class SkyDodgeModule extends EventTarget implements GameModule {
           : "SHIELD READY";
       this.hud.textContent = `SCORE ${this.engine.score} · ${shieldLabel}`;
     }
+  }
 
-    if (result === "collision") {
-      this.endRun("collision");
-      return;
-    }
+  private resume() {
+    if (this.state !== "paused") return;
+    this.state = "running";
+    if (this.pauseOverlay) this.pauseOverlay.style.display = "none";
+    this.fixedLoop?.start();
+  }
 
-    this.rafId = requestAnimationFrame(this.loop);
-  };
+  pause(): void {
+    if (this.state !== "running") return;
+    this.state = "paused";
+    this.fixedLoop?.stop();
+    // Deliberately NOT forcing input.moveLeft/moveRight false here: the
+    // fixed-timestep loop is fully stopped while paused, so engine.update
+    // never reads them until resume — leaving them as-is means a still-held
+    // arrow key keeps working immediately on resume without needing a
+    // release+re-press, and correctly reflects false already if the key was
+    // released while paused (handleKeyUp still fires).
+    if (this.pauseOverlay) this.pauseOverlay.style.display = "flex";
+  }
 
   private endRun(reason: "collision" | "quit") {
     this.state = "ended";
-    if (this.rafId !== null) cancelAnimationFrame(this.rafId);
-    this.rafId = null;
+    this.fixedLoop?.stop();
     if (this.pauseOverlay) this.pauseOverlay.style.display = "none";
 
     const payload: GameOverPayload = {
       score: this.engine.score,
       reason,
       durationMs: Math.round(performance.now() - this.runStartTime),
+      seed: this.seed,
+      inputLog: this.inputLog,
     };
     this.dispatchEvent(new CustomEvent("gameOver", { detail: payload }));
   }
 
   destroy(): void {
-    if (this.rafId !== null) cancelAnimationFrame(this.rafId);
-    this.rafId = null;
+    this.fixedLoop?.stop();
+    this.fixedLoop = null;
     if (this.countdownTimeoutId !== null) clearTimeout(this.countdownTimeoutId);
     this.resizeObserver?.disconnect();
     window.removeEventListener("keydown", this.handleKeyDown);

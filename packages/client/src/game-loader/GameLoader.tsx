@@ -24,7 +24,12 @@ export default function GameLoader({ createModule, gameTitle, onExit }: GameLoad
     mod.addEventListener('gameOver', ((e: Event) => {
       setResult((e as CustomEvent<GameOverPayload>).detail)
     }) as EventListener)
-    mod.init(container, 'practice', null)
+    // A fresh seed per mount (including Play Again, which remounts via a new
+    // module instance) — this is the host picking an arbitrary starting
+    // point for one run, not gameplay-affecting randomness, so it doesn't
+    // go through the seeded gameplay/cosmetic streams inside the engine.
+    const seed = Math.floor(Math.random() * 0x100000000)
+    mod.init(container, 'practice', null, seed)
     mod.start()
   }
 

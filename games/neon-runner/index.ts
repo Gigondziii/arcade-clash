@@ -1,4 +1,12 @@
-import type { GameMode, GameModule, GameOverPayload } from "@arcadeclash/shared";
+import {
+  createFixedTimestepLoop,
+  FIXED_TIMESTEP_SEC,
+  type FixedTimestepLoop,
+  type GameMode,
+  type GameModule,
+  type GameOverPayload,
+  type InputLogEntry,
+} from "@arcadeclash/shared";
 import { PALETTE } from "./constants";
 import { RunnerEngine, type EngineInput } from "./engine";
 
@@ -22,20 +30,36 @@ export class NeonRunnerModule extends EventTarget implements GameModule {
   private countdownEl: HTMLDivElement | null = null;
   private pauseOverlay: HTMLDivElement | null = null;
 
-  private engine = new RunnerEngine();
+  // Constructed in init() once the seed is known, not as a field
+  // initializer — the engine's determinism depends on that seed.
+  private engine!: RunnerEngine;
   private resizeObserver: ResizeObserver | null = null;
 
   private state: ModuleState = "idle";
-  private rafId: number | null = null;
-  private lastFrameTime = 0;
+  private fixedLoop: FixedTimestepLoop | null = null;
   private runStartTime = 0;
   private countdownTimeoutId: ReturnType<typeof setTimeout> | null = null;
 
+  private seed = 0;
+  private inputLog: InputLogEntry[] = [];
+
   private input: EngineInput = { jumpPressed: false, jumpReleased: false, slidePressed: false };
   private jumpKeyDown = false;
+  private slideKeyDown = false;
   private pointerStartY = 0;
   private pointerActive = false;
   private pointerSlidTriggered = false;
+
+  // Records a tick-tagged input transition for replay. Only meaningful once
+  // the run has actually started (fixedLoop exists) — input received during
+  // countdown/idle never reaches engine.update, so there's no tick to tag it
+  // with.
+  private logInput(action: string) {
+    if (!this.fixedLoop) return;
+    // wallMs is evidence only — never read by tick/action replay. See the
+    // type's doc comment in packages/shared/src/gameModule.ts.
+    this.inputLog.push({ tick: this.fixedLoop.tick, action, wallMs: performance.now() - this.runStartTime });
+  }
 
   private handleKeyDown = (e: KeyboardEvent) => {
     if (e.code === "Space" || e.code === "ArrowUp") {
@@ -43,10 +67,15 @@ export class NeonRunnerModule extends EventTarget implements GameModule {
       if (!this.jumpKeyDown) {
         this.jumpKeyDown = true;
         this.input.jumpPressed = true;
+        this.logInput("jumpPressed");
       }
     } else if (e.code === "ArrowDown") {
       e.preventDefault();
-      this.input.slidePressed = true;
+      if (!this.slideKeyDown) {
+        this.slideKeyDown = true;
+        this.input.slidePressed = true;
+        this.logInput("slidePressed");
+      }
     }
   };
 
@@ -54,6 +83,9 @@ export class NeonRunnerModule extends EventTarget implements GameModule {
     if (e.code === "Space" || e.code === "ArrowUp") {
       this.jumpKeyDown = false;
       this.input.jumpReleased = true;
+      this.logInput("jumpReleased");
+    } else if (e.code === "ArrowDown") {
+      this.slideKeyDown = false;
     }
   };
 
@@ -72,6 +104,7 @@ export class NeonRunnerModule extends EventTarget implements GameModule {
     if (e.clientY - this.pointerStartY > 40) {
       this.pointerSlidTriggered = true;
       this.input.slidePressed = true;
+      this.logInput("slidePressed");
     }
   };
 
@@ -79,6 +112,8 @@ export class NeonRunnerModule extends EventTarget implements GameModule {
     if (this.pointerActive && !this.pointerSlidTriggered) {
       this.input.jumpPressed = true;
       this.input.jumpReleased = true;
+      this.logInput("jumpPressed");
+      this.logInput("jumpReleased");
     }
     this.pointerActive = false;
   };
@@ -87,12 +122,15 @@ export class NeonRunnerModule extends EventTarget implements GameModule {
     if (document.hidden && this.state === "running") this.pause();
   };
 
-  init(container: HTMLElement, mode: GameMode, _opponentSocket: WebSocket | null): void {
+  init(container: HTMLElement, mode: GameMode, _opponentSocket: WebSocket | null, seed: number): void {
     if (mode === "match") {
       console.warn(
         "[neon-runner] 'match' mode requested but multiplayer isn't implemented during the games-only build phase — running as practice.",
       );
     }
+
+    this.seed = seed;
+    this.engine = new RunnerEngine(seed);
 
     this.root = document.createElement("div");
     this.root.style.cssText =
@@ -183,6 +221,7 @@ export class NeonRunnerModule extends EventTarget implements GameModule {
     }
     if (this.state === "running" || this.state === "countdown") return;
     this.engine.reset();
+    this.inputLog = [];
     this.state = "countdown";
     this.runCountdown();
   }
@@ -210,65 +249,61 @@ export class NeonRunnerModule extends EventTarget implements GameModule {
   private beginRun() {
     this.state = "running";
     this.runStartTime = performance.now();
-    this.lastFrameTime = performance.now();
-    this.loop();
+    this.fixedLoop = createFixedTimestepLoop({
+      update: (tick) => this.tick(tick),
+      render: () => this.render(),
+    });
+    this.fixedLoop.start();
+  }
+
+  private tick(_tick: number) {
+    const result = this.engine.update(FIXED_TIMESTEP_SEC, this.input);
+    this.input.jumpPressed = false;
+    this.input.jumpReleased = false;
+    this.input.slidePressed = false;
+
+    if (result === "collision") {
+      this.endRun("collision");
+    }
+  }
+
+  private render() {
+    if (this.ctx) this.engine.draw(this.ctx);
+    if (this.hud) this.hud.textContent = `SCORE ${this.engine.score}`;
   }
 
   private resume() {
     if (this.state !== "paused") return;
     this.state = "running";
-    this.lastFrameTime = performance.now();
     if (this.pauseOverlay) this.pauseOverlay.style.display = "none";
-    this.loop();
+    this.fixedLoop?.start();
   }
 
   pause(): void {
     if (this.state !== "running") return;
     this.state = "paused";
-    if (this.rafId !== null) cancelAnimationFrame(this.rafId);
-    this.rafId = null;
+    this.fixedLoop?.stop();
     if (this.pauseOverlay) this.pauseOverlay.style.display = "flex";
   }
 
-  private loop = () => {
-    if (this.state !== "running") return;
-    const now = performance.now();
-    const dt = Math.min(0.05, (now - this.lastFrameTime) / 1000);
-    this.lastFrameTime = now;
-
-    const result = this.engine.update(dt, this.input);
-    this.input.jumpPressed = false;
-    this.input.jumpReleased = false;
-    this.input.slidePressed = false;
-
-    if (this.ctx) this.engine.draw(this.ctx);
-    if (this.hud) this.hud.textContent = `SCORE ${this.engine.score}`;
-
-    if (result === "collision") {
-      this.endRun("collision");
-      return;
-    }
-
-    this.rafId = requestAnimationFrame(this.loop);
-  };
-
   private endRun(reason: "collision" | "quit") {
     this.state = "ended";
-    if (this.rafId !== null) cancelAnimationFrame(this.rafId);
-    this.rafId = null;
+    this.fixedLoop?.stop();
     if (this.pauseOverlay) this.pauseOverlay.style.display = "none";
 
     const payload: GameOverPayload = {
       score: this.engine.score,
       reason,
       durationMs: Math.round(performance.now() - this.runStartTime),
+      seed: this.seed,
+      inputLog: this.inputLog,
     };
     this.dispatchEvent(new CustomEvent("gameOver", { detail: payload }));
   }
 
   destroy(): void {
-    if (this.rafId !== null) cancelAnimationFrame(this.rafId);
-    this.rafId = null;
+    this.fixedLoop?.stop();
+    this.fixedLoop = null;
     if (this.countdownTimeoutId !== null) clearTimeout(this.countdownTimeoutId);
     this.resizeObserver?.disconnect();
     window.removeEventListener("keydown", this.handleKeyDown);
