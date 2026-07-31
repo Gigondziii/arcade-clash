@@ -6,6 +6,7 @@
   "main": "./registry.ts",
   "exports": {
     ".": "./registry.ts",
+    "./replayAdapters": "./replayAdapters.ts",
     "./neon-runner": "./neon-runner/index.ts",
     "./pixel-ninja-dash": "./pixel-ninja-dash/index.ts",
     "./sky-dodge": "./sky-dodge/index.ts"

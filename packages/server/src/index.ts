@@ -1,7 +1,9 @@
 import "dotenv/config";
+import { createServer } from "node:http";
 import cookieParser from "cookie-parser";
 import cors from "cors";
 import express, { type ErrorRequestHandler } from "express";
+import { attachMatchmaking } from "./matchmaking";
 import { authRouter } from "./routes/auth";
 
 const app = express();
@@ -27,7 +29,10 @@ const errorHandler: ErrorRequestHandler = (err, _req, res, _next) => {
 };
 app.use(errorHandler);
 
+const httpServer = createServer(app);
+attachMatchmaking(httpServer, { clientOrigin });
+
 const port = Number(process.env.PORT ?? 4000);
-app.listen(port, () => {
+httpServer.listen(port, () => {
   console.log(`[server] listening on http://localhost:${port}`);
 });

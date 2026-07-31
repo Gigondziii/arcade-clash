@@ -31,6 +31,15 @@ in `PROGRESS.md`.
    reading it, grepping it, or running it) — don't write something as
    built based on it having been discussed, proposed, or intended.
 
+5. **Before reporting a session complete, run every test script in
+   `scripts/`, not just the ones touched by that session's work, and
+   report each script's pass count explicitly.** "Tests pass" without a
+   count is not verification. Added 2026-07-31 after
+   `scripts/matchmaking-check.ts` silently failed 6 assertions for two
+   sessions — a payload-shape change in one session's work (score
+   validation requiring `inputLog`/`viewport` on every submission) broke
+   a different, unrelated script that nobody re-ran to check.
+
 ## Environment gotchas (this machine specifically — see PROGRESS.md "Decisions" for full detail on each)
 
 - Node.js is not on the system PATH — prefix PowerShell commands with

@@ -17,13 +17,32 @@
 //      from real frame timing — irregular delivery is exactly what differs
 //      between two real players/sessions, and engine-only testing (#1) never
 //      exercises the loop's accumulator/clamp logic at all.
-
-import { createFixedTimestepLoop, FIXED_TIMESTEP_SEC, type InputLogEntry } from "@arcadeclash/shared";
-import { RunnerEngine, type EngineInput as RunnerInput } from "../games/neon-runner/engine.ts";
-import { DashEngine, type EngineInput as DashInput } from "../games/pixel-ninja-dash/engine.ts";
-import { DodgeEngine, type EngineInput as DodgeInput } from "../games/sky-dodge/engine.ts";
+//
+// As of the score-validation session, both tests drive each engine through
+// the SAME shared adapters + replayEngine() driver that
+// packages/server/src/validation/scoreValidator.ts uses for real match
+// submissions (games/<id>/replay.ts, packages/shared/src/replay.ts) —
+// previously this file hand-rolled its own per-game action->input mapping,
+// duplicating what each game's index.ts already did live. Now there's one
+// copy of that mapping per game, and this suite and the real validator
+// provably run the same code path: a broken adapter fails both, not just
+// one silently.
+import { createFixedTimestepLoop, FIXED_TIMESTEP_SEC, replayEngine, type InputLogEntry } from "@arcadeclash/shared";
+import { RunnerEngine } from "../games/neon-runner/engine.ts";
+import { neonRunnerReplayAdapter } from "../games/neon-runner/replay.ts";
+import { pixelNinjaDashReplayAdapter } from "../games/pixel-ninja-dash/replay.ts";
+import { skyDodgeReplayAdapter } from "../games/sky-dodge/replay.ts";
 
 const SEED = 424242;
+// Canonical viewport for every replay in this suite. Real gameplay never
+// happens at width=0 (a real ResizeObserver always fires with the actual
+// container size before start()), and RunnerEngine/DodgeEngine's spawn and
+// collision math are functions of width (see PROGRESS.md's viewport/
+// determinism Known Gaps entry) — so a nonzero, consistent size is what
+// actually exercises that path. The exact value doesn't matter for these
+// assertions (every comparison is two runs against the SAME viewport), only
+// that it's realistic and held constant.
+const VIEWPORT = { width: 1280, height: 720 };
 let failures = 0;
 
 function check(label: string, pass: boolean, detail?: string) {
@@ -41,66 +60,30 @@ function check(label: string, pass: boolean, detail?: string) {
 
 type EngineSnapshot = { score: number; json: string };
 
-function snapshot(engine: { score: number }): EngineSnapshot {
+function snapshotFrom(engine: { score: number }): EngineSnapshot {
   return { score: engine.score, json: JSON.stringify(engine) };
 }
 
+// All 3 of these now just call the same shared driver + per-game adapter the
+// real server validator uses (packages/server/src/validation/
+// scoreValidator.ts) — previously each of these hand-rolled its own copy of
+// the action->input mapping games/<id>/index.ts already implements live.
+// early-exiting on a terminal result (replayEngine's behavior) vs. always
+// running the full `ticks` count (this file's old behavior) produce
+// identical final snapshots either way: every engine's update() is a no-op
+// once ended, so looping past the terminal tick never changes captured
+// state — confirmed by reading RunnerEngine/DashEngine/DodgeEngine's
+// `if (this.ended) return ...` guards.
 function runNeonRunner(seed: number, inputLog: InputLogEntry[], ticks: number): EngineSnapshot {
-  const engine = new RunnerEngine(seed);
-  engine.reset();
-  const input: RunnerInput = { jumpPressed: false, jumpReleased: false, slidePressed: false };
-  let logIdx = 0;
-  for (let tick = 0; tick < ticks; tick++) {
-    while (logIdx < inputLog.length && inputLog[logIdx].tick === tick) {
-      const action = inputLog[logIdx].action;
-      if (action === "jumpPressed") input.jumpPressed = true;
-      else if (action === "jumpReleased") input.jumpReleased = true;
-      else if (action === "slidePressed") input.slidePressed = true;
-      logIdx++;
-    }
-    engine.update(FIXED_TIMESTEP_SEC, input);
-    input.jumpPressed = false;
-    input.jumpReleased = false;
-    input.slidePressed = false;
-  }
-  return snapshot(engine);
+  return snapshotFrom(replayEngine(neonRunnerReplayAdapter, seed, inputLog, VIEWPORT, ticks).engine);
 }
 
 function runPixelNinjaDash(seed: number, inputLog: InputLogEntry[], ticks: number): EngineSnapshot {
-  const engine = new DashEngine(seed);
-  engine.reset();
-  const input: DashInput = { dashPressed: false };
-  let logIdx = 0;
-  for (let tick = 0; tick < ticks; tick++) {
-    while (logIdx < inputLog.length && inputLog[logIdx].tick === tick) {
-      if (inputLog[logIdx].action === "dashPressed") input.dashPressed = true;
-      logIdx++;
-    }
-    engine.update(FIXED_TIMESTEP_SEC, input);
-    input.dashPressed = false;
-  }
-  return snapshot(engine);
+  return snapshotFrom(replayEngine(pixelNinjaDashReplayAdapter, seed, inputLog, VIEWPORT, ticks).engine);
 }
 
 function runSkyDodge(seed: number, inputLog: InputLogEntry[], ticks: number): EngineSnapshot {
-  const engine = new DodgeEngine(seed);
-  engine.reset();
-  const input: DodgeInput = { moveLeft: false, moveRight: false, dragTargetX: null, shieldPressed: false };
-  let logIdx = 0;
-  for (let tick = 0; tick < ticks; tick++) {
-    while (logIdx < inputLog.length && inputLog[logIdx].tick === tick) {
-      const action = inputLog[logIdx].action;
-      if (action === "moveLeftDown") input.moveLeft = true;
-      else if (action === "moveLeftUp") input.moveLeft = false;
-      else if (action === "moveRightDown") input.moveRight = true;
-      else if (action === "moveRightUp") input.moveRight = false;
-      else if (action === "shieldPressed") input.shieldPressed = true;
-      logIdx++;
-    }
-    engine.update(FIXED_TIMESTEP_SEC, input);
-    input.shieldPressed = false;
-  }
-  return snapshot(engine);
+  return snapshotFrom(replayEngine(skyDodgeReplayAdapter, seed, inputLog, VIEWPORT, ticks).engine);
 }
 
 console.log("Test 1: engine replay determinism (same seed + same inputLog, twice)\n");
@@ -159,8 +142,9 @@ function runNeonRunnerThroughLoop(
   inputLog: InputLogEntry[],
 ): { snapshot: EngineSnapshot; tickSequence: number[] } {
   const engine = new RunnerEngine(seed);
+  engine.resize(VIEWPORT.width, VIEWPORT.height);
   engine.reset();
-  const input: RunnerInput = { jumpPressed: false, jumpReleased: false, slidePressed: false };
+  const input = neonRunnerReplayAdapter.createInitialInput();
   const tickSequence: number[] = [];
   let logIdx = 0;
   let nowMs = 0;
@@ -181,17 +165,12 @@ function runNeonRunnerThroughLoop(
   const loop = createFixedTimestepLoop({
     update: (tick) => {
       while (logIdx < inputLog.length && inputLog[logIdx].tick === tick) {
-        const action = inputLog[logIdx].action;
-        if (action === "jumpPressed") input.jumpPressed = true;
-        else if (action === "jumpReleased") input.jumpReleased = true;
-        else if (action === "slidePressed") input.slidePressed = true;
+        neonRunnerReplayAdapter.applyAction(input, inputLog[logIdx].action);
         logIdx++;
       }
       tickSequence.push(tick);
-      engine.update(FIXED_TIMESTEP_SEC, input);
-      input.jumpPressed = false;
-      input.jumpReleased = false;
-      input.slidePressed = false;
+      neonRunnerReplayAdapter.update(engine, FIXED_TIMESTEP_SEC, input);
+      neonRunnerReplayAdapter.clearPulses(input);
       if (tick + 1 >= checkpointTicks) loop.stop();
     },
     render: () => {},
@@ -215,7 +194,7 @@ function runNeonRunnerThroughLoop(
     cb(nowMs);
   }
 
-  return { snapshot: snapshot(engine), tickSequence };
+  return { snapshot: snapshotFrom(engine), tickSequence };
 }
 
 const TARGET_TICKS = 300; // 5 simulated seconds at 60Hz

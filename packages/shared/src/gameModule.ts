@@ -30,6 +30,13 @@ export type GameOverPayload = {
   durationMs: number;
   seed: number;
   inputLog: InputLogEntry[];
+  // The container size last passed to the engine's resize(), captured at
+  // beginRun() — some engines' spawn/collision math is a function of
+  // width/height (see packages/shared/src/replay.ts's ReplayAdapter doc),
+  // so server-side replay needs this to reproduce the same run. Not
+  // re-captured on a mid-run container resize (rare; see PROGRESS.md Known
+  // Gaps) — only the size in effect when the run started.
+  viewport: { width: number; height: number };
 };
 
 export interface GameModule extends EventTarget {

@@ -9,10 +9,11 @@ type GameCardProps = {
   plays: number
   rating: number
   onPlay?: () => void
+  onFindOpponent?: () => void
   loading?: boolean
 }
 
-export default function GameCard({ title, engine, plays, rating, onPlay, loading }: GameCardProps) {
+export default function GameCard({ title, engine, plays, rating, onPlay, onFindOpponent, loading }: GameCardProps) {
   const tagColor = categoryColors[engine]
 
   return (
@@ -55,6 +56,19 @@ export default function GameCard({ title, engine, plays, rating, onPlay, loading
             {loading ? 'Loading…' : `${formatPlays(plays)} PLAYS`}
           </span>
         </div>
+        {onFindOpponent && (
+          <button
+            type="button"
+            className="ac-pill"
+            onClick={(e) => {
+              e.stopPropagation()
+              onFindOpponent()
+            }}
+            style={{ marginTop: 'var(--space-3)', width: '100%', justifyContent: 'center' }}
+          >
+            Find Opponent
+          </button>
+        )}
       </div>
     </div>
   )

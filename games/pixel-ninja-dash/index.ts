@@ -38,6 +38,20 @@ export class PixelNinjaDashModule extends EventTarget implements GameModule {
 
   private seed = 0;
   private inputLog: InputLogEntry[] = [];
+  private mode: GameMode = "practice";
+  // Last size passed to engine.resize() — captured for GameOverPayload so
+  // server-side replay can call resize() with the same value (see
+  // packages/shared/src/gameModule.ts's GameOverPayload doc comment).
+  // DashEngine's own scoring/collision math happens not to depend on
+  // width/height, but every game reports viewport uniformly rather than
+  // special-casing the ones that don't currently need it.
+  private lastResizeWidth = 0;
+  private lastResizeHeight = 0;
+  // Armed by a first click on the Forfeit control; a second click within
+  // this window actually forfeits, otherwise it reverts. Cleared in
+  // destroy() and endRun() so a stale timer can't fire against a torn-down
+  // or already-ended module.
+  private forfeitConfirmTimeoutId: ReturnType<typeof setTimeout> | null = null;
 
   private input: EngineInput = { dashPressed: false };
   private dashKeyDown = false;
@@ -74,16 +88,22 @@ export class PixelNinjaDashModule extends EventTarget implements GameModule {
   };
 
   private handleVisibilityChange = () => {
-    if (document.hidden && this.state === "running") this.pause();
+    if (!document.hidden || this.state !== "running") return;
+    if (this.mode === "match") {
+      // Match mode has no pause to fall back to (see pause()'s own guard) —
+      // going hidden ends the run immediately as a forfeit, the same real
+      // score/inputLog/validation path a manual Forfeit click uses, just a
+      // distinct reason string for observability. Deliberately no grace
+      // period — see PROGRESS.md's session log for why a short one would
+      // just make the freeze-frame exploit repeatable instead of closing it.
+      this.endRun("backgrounded");
+    } else {
+      this.pause();
+    }
   };
 
   init(container: HTMLElement, mode: GameMode, _opponentSocket: WebSocket | null, seed: number): void {
-    if (mode === "match") {
-      console.warn(
-        "[pixel-ninja-dash] 'match' mode requested but multiplayer isn't implemented during the games-only build phase — running as practice.",
-      );
-    }
-
+    this.mode = mode;
     this.seed = seed;
     this.engine = new DashEngine(seed);
 
@@ -105,16 +125,51 @@ export class PixelNinjaDashModule extends EventTarget implements GameModule {
     this.hud.textContent = "SCORE 0 · 60s";
     this.root.appendChild(this.hud);
 
-    const pauseButton = document.createElement("button");
-    pauseButton.textContent = "II";
-    pauseButton.setAttribute("aria-label", "Pause");
-    pauseButton.style.cssText = `
-      position:absolute; top:26px; right:12px; width:34px; height:34px;
-      border-radius:9999px; border:1px solid ${PALETTE.purple}; background:rgba(10,10,15,0.6);
-      color:${PALETTE.text}; font-family:ui-monospace,monospace; cursor:pointer;
-    `;
-    pauseButton.addEventListener("click", () => this.pause());
-    this.root.appendChild(pauseButton);
+    // No pause affordance in match mode — see pause()'s own guard for why.
+    // Match mode gets a Forfeit control in the same spot instead — an
+    // honest concede path (real score, real inputLog, real validation,
+    // exactly like practice's Quit Run). Click-twice confirm rather than
+    // hold-to-confirm: fewer edge cases, still fully prevents a misclick.
+    if (this.mode !== "match") {
+      const pauseButton = document.createElement("button");
+      pauseButton.textContent = "II";
+      pauseButton.setAttribute("aria-label", "Pause");
+      pauseButton.style.cssText = `
+        position:absolute; top:26px; right:12px; width:34px; height:34px;
+        border-radius:9999px; border:1px solid ${PALETTE.purple}; background:rgba(10,10,15,0.6);
+        color:${PALETTE.text}; font-family:ui-monospace,monospace; cursor:pointer;
+      `;
+      pauseButton.addEventListener("click", () => this.pause());
+      this.root.appendChild(pauseButton);
+    } else {
+      const forfeitButton = document.createElement("button");
+      forfeitButton.textContent = "Forfeit";
+      forfeitButton.setAttribute("aria-label", "Forfeit match");
+      forfeitButton.title = "Click twice to forfeit — ends the match with your current score.";
+      const armedStyle = (color: string) => `
+        position:absolute; top:26px; right:12px; height:34px; padding:0 14px;
+        border-radius:9999px; border:1px solid ${color}; background:rgba(10,10,15,0.6);
+        color:${PALETTE.text}; font-family:ui-monospace,monospace; font-size:13px; cursor:pointer;
+      `;
+      forfeitButton.style.cssText = armedStyle(PALETTE.purple);
+      forfeitButton.addEventListener("click", () => {
+        if (this.state !== "running") return;
+        if (this.forfeitConfirmTimeoutId) {
+          clearTimeout(this.forfeitConfirmTimeoutId);
+          this.forfeitConfirmTimeoutId = null;
+          this.endRun("quit");
+          return;
+        }
+        forfeitButton.textContent = "Confirm?";
+        forfeitButton.style.cssText = armedStyle(PALETTE.magenta);
+        this.forfeitConfirmTimeoutId = setTimeout(() => {
+          this.forfeitConfirmTimeoutId = null;
+          forfeitButton.textContent = "Forfeit";
+          forfeitButton.style.cssText = armedStyle(PALETTE.purple);
+        }, 3000);
+      });
+      this.root.appendChild(forfeitButton);
+    }
 
     this.countdownEl = document.createElement("div");
     this.countdownEl.style.cssText = `
@@ -165,6 +220,8 @@ export class PixelNinjaDashModule extends EventTarget implements GameModule {
     this.canvas.height = h * dpr;
     this.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     this.engine.resize(w, h);
+    this.lastResizeWidth = w;
+    this.lastResizeHeight = h;
   };
 
   start(): void {
@@ -235,16 +292,26 @@ export class PixelNinjaDashModule extends EventTarget implements GameModule {
   }
 
   pause(): void {
+    // Disabled in match mode — see games/neon-runner/index.ts's pause() for
+    // the full freeze-frame reasoning; identical here. handleVisibilityChange
+    // no longer routes through this guard in match mode — it calls
+    // endRun("backgrounded") directly instead — but the guard stays as a
+    // second line of defense against any other future caller.
+    if (this.mode === "match") return;
     if (this.state !== "running") return;
     this.state = "paused";
     this.fixedLoop?.stop();
     if (this.pauseOverlay) this.pauseOverlay.style.display = "flex";
   }
 
-  private endRun(reason: "finished" | "timeout" | "quit") {
+  private endRun(reason: "finished" | "timeout" | "quit" | "backgrounded") {
     this.state = "ended";
     this.fixedLoop?.stop();
     if (this.pauseOverlay) this.pauseOverlay.style.display = "none";
+    if (this.forfeitConfirmTimeoutId) {
+      clearTimeout(this.forfeitConfirmTimeoutId);
+      this.forfeitConfirmTimeoutId = null;
+    }
 
     const payload: GameOverPayload = {
       score: this.engine.score,
@@ -252,6 +319,7 @@ export class PixelNinjaDashModule extends EventTarget implements GameModule {
       durationMs: Math.round(performance.now() - this.runStartTime),
       seed: this.seed,
       inputLog: this.inputLog,
+      viewport: { width: this.lastResizeWidth, height: this.lastResizeHeight },
     };
     this.dispatchEvent(new CustomEvent("gameOver", { detail: payload }));
   }
@@ -260,6 +328,7 @@ export class PixelNinjaDashModule extends EventTarget implements GameModule {
     this.fixedLoop?.stop();
     this.fixedLoop = null;
     if (this.countdownTimeoutId !== null) clearTimeout(this.countdownTimeoutId);
+    if (this.forfeitConfirmTimeoutId !== null) clearTimeout(this.forfeitConfirmTimeoutId);
     this.resizeObserver?.disconnect();
     window.removeEventListener("keydown", this.handleKeyDown);
     window.removeEventListener("keyup", this.handleKeyUp);
