@@ -3,112 +3,127 @@
 Self-contained handoff doc. Read this first at the start of every session —
 conversations don't carry over, and work may resume from a different tool.
 
-## NEXT SESSION: WALLET PART 1 — the ledger, points only, no stakes
+## NEXT SESSION: FIXED VIRTUAL RESOLUTION — decouple all 3 games' simulation from real viewport size, letterbox
 
 This section is written for zero prior context — read it alone and you have
 enough to start. The rest of this file is full project history/detail for
 "why"; skim it only if you need that. (Remove this section once this
 session actually starts, same convention as every prior "NEXT SESSION"
 brief — see session 13's and session 16's log entries for precedent.)
+Reordered ahead of wallet part 1 (session 18) — see "why this jumped the
+queue" below.
 
-**What this session builds:** an append-only points ledger and a way to
-derive a balance from it. That's the whole scope. Read the exclusions below
-before writing any code — it's easy to over-build this.
+**What this session builds:** all 3 games' gameplay simulation (not
+rendering) driven by a fixed virtual resolution instead of the real
+viewport, so two players on different screen sizes play the identical
+course. Scaled to the real canvas only at render time, via **letterbox**
+(uniform scale, fit to the smaller axis, centered, bars in the app's own
+background color) — **DECIDED, not open, session 18. Stretch was
+considered and explicitly rejected:** it doesn't remove the unfairness,
+it converts it into a subtler form (same simulation, different on-screen
+reaction distances via distorted hit-target geometry — a wide monitor
+still wins, just less visibly). Do not re-litigate this at the start of
+the session; the one remaining open detail is which exact virtual
+resolution to standardize on (1280x720 was used as a stand-in in test
+fixtures through sessions 16-18 — reasonable default, confirm or change
+it, doesn't need to block starting).
 
-**Explicitly OUT of scope this session:**
-- **Stakes or escrow** (locking points against a match, settling a pot on a
-  result) — that's wallet part 2, a separate future session, not started.
-- **Match settlement.** Matchmaking's server-side score validation and
-  winner determination (`packages/server/src/validation/{scoreValidator,
-  matchOutcome}.ts`, sessions 15-17) already produce an authoritative
-  `outcome` (`"win" | "loss" | "draw" | "void"`) per match — but nothing
-  persists it anywhere or acts on it. Nothing in this session should change
-  that. No match currently affects, or should affect, a balance.
-- **Real money.** Per "Product direction" further down this file: no
-  real-money code this year, a hard constraint on scope, not a soft
-  preference. Points only.
-- Also not blocked on, but don't confuse with this session: two STAKES
-  BLOCKER entries exist in Known Gaps (viewport-coupled gameplay simulation;
-  no reconnection window on disconnect) — both block wallet part 2 (stakes),
-  neither blocks this session (the ledger itself has no gameplay dependency).
+**Why this jumped the queue ahead of wallet part 1 — the user's own
+reasoning, recorded so it isn't re-litigated:** server-side score
+validation and winner determination (session 16) already treat a match's
+`outcome` as authoritative, and escrow will eventually settle real payouts
+on that exact path. Building the wallet ledger now, then stakes/escrow on
+top of it later, only to discover the underlying match-result foundation
+was still viewport-tainted, means rebuilding the foundation right after
+finishing the layer built on top of it. Fix the foundation first, build
+the wallet on solid ground.
 
-**Money-representation rules — MUST hold from this session's first commit,
-not retrofit later.** Copied here verbatim from "Product direction" further
-down this file so this brief is self-contained; that section has the full
-business context if you want it:
-- All balances stored as INTEGERS in minor units, never floats.
-- Every ledger row carries a `currency` field, set to `POINTS` for now —
-  adding a real currency (e.g. GEL) later is a new value in that column,
-  not a schema migration.
-- Balances are DERIVED from an append-only ledger, never stored as an
-  independently-mutable field. If a cached/denormalized balance exists for
-  read performance, a reconciliation job must recompute it from the ledger
-  and alert on mismatch — the cache is never the source of truth.
-- The rake (a house cut, once stakes exist) is a ledger entry to a house
-  account, not money disappearing from the system — not needed this
-  session (no stakes yet), but the schema should be able to represent it
-  later without a migration.
-- System invariant: **the sum of all balances is constant except at an
-  explicit grant/deposit event.** Any code path that can change that sum
-  without one is a bug. This is the invariant to design the schema/API
-  around from the start, and the one worth writing a test against.
-- Points reset at real-money launch, and this must be stated in the UI
-  before anyone accumulates a points balance — no user should be surprised
-  later that their points didn't carry over. Keep the schema/design
-  compatible with a future reset operation; don't bake in an assumption
-  that a balance is permanent.
+**The measured evidence that made this non-theoretical (session 18, read
+the full writeup in Known Gaps and that session's log entry for more):**
+a real two-client match, zero input from both sides, produced Neon Runner
+scores of 221 and 157 — no exploit attempt, just two people using their
+browsers normally (one maximized, one a never-resized default incognito
+window). Measured by replaying `RunnerEngine` headless across swept
+widths: **score is ~0.1 points per pixel of canvas width, roughly linear.**
+Working 221/157 back through that slope lands on ~1560px and ~920px —
+consistent with maximized-vs-default-incognito, not a large or deliberate
+gap. A player on 1920px scores ~33% higher than one on 1280px with
+identical play. Seed identity across both clients was confirmed clean (by
+code — a single `generateSeed()` call feeds both sides — and via
+temporary diagnostic logging added session 18, see the cleanup note
+below), so this is genuinely the viewport effect, not a second bug.
 
-**Current auth/user schema** (`packages/server/src/db/schema.ts` — read the
-actual file before assuming its shape, don't trust this copy if it's drifted):
-```ts
-export const users = pgTable("users", {
-  id: text("id").primaryKey(),
-  username: varchar("username", { length: 32 }).notNull().unique(),
-  email: varchar("email", { length: 255 }).unique(),
-  passwordHash: text("password_hash").notNull(),
-  avatarUrl: text("avatar_url"),
-  gamesPlayed: integer("games_played").notNull().default(0),
-  gamesWon: integer("games_won").notNull().default(0),
-  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-});
-```
-`users.id` (`text`, a UUID string — see `routes/auth.ts` for how it's
-generated at signup) is the foreign key a ledger table would reference.
-`gamesPlayed`/`gamesWon` are pre-existing, still-inert stat columns —
-unrelated to points/wallet, nothing currently increments them, don't
-conflate them with this session's work.
+**Exact call sites where simulation currently reads canvas width/height**
+(re-verified fresh session 18 from the actual `engine.ts` files, not
+recalled from the original session-16 pass — session 16's own summary
+under-reported Sky Dodge, see below, so read the code again rather than
+trust any prior summary including this one):
+- **`games/pixel-ninja-dash/engine.ts` — not actually affected.** The
+  `playerX` getter reads `this.width`, but every call site (inside
+  `draw()`, and inside `spawnParticles()` for cosmetic particle spawn
+  position only) never feeds back into score, collision, timing, or the
+  gameplay RNG stream. This engine needs only a `draw()`-side scale
+  transform, no simulation-code changes. Confirm this is still true by
+  re-reading `engine.ts` before assuming it — don't just trust this line.
+- **`games/neon-runner/engine.ts` — width only, height is a non-issue.**
+  `playerX` getter (`this.width * PLAYER.xFraction`) and the obstacle
+  spawn x (`this.width + 40`, inside `update()`) both need to switch to a
+  fixed constant for simulation, keeping the real value for `draw()`'s
+  scale transform. `resize()` also sets `this.groundY = height * 0.78`,
+  but height algebraically cancels out of both collision checks (hurdle:
+  `playerBottom > hurdleTop`; overhang: `playerTop < gapTop` — both sides
+  of both comparisons are groundY-relative), so it never changes gameplay
+  outcome, only draw position. Don't bother threading height through
+  simulation code here.
+- **`games/sky-dodge/engine.ts` — width AND height, both real.** Width:
+  `resize()`'s playerX clamp, `reset()`'s initial `playerX =
+  this.width / 2`, `spawnHazard()`'s x placement
+  (`gameplayRng() * (this.width - size)`), `update()`'s playerX clamp —
+  4 call sites. **Height also matters here, unlike Neon Runner — this is
+  the correction to make from the original session-16 summary, which
+  only flagged width for this game:** the `shipY` getter returns
+  `this.height - 60`, an ABSOLUTE position that does NOT cancel out, and
+  hazards fall from off the top of the screen toward `shipY` at a fixed
+  speed — so viewport height directly controls how much time a player
+  gets to react to a falling hazard. A taller viewport is a real,
+  unearned advantage on this axis, separate from the width one. Both
+  need the simulation/render split, not just width.
 
-**DB migrations — Drizzle ORM/Kit.** Schema source: `packages/server/src/
-db/schema.ts` (the only schema file so far — add the ledger table here).
-Config: `packages/server/drizzle.config.ts` (points `schema` at that file,
-`out` at `packages/server/drizzle/`). Generated SQL migrations live in
-`packages/server/drizzle/` (currently just `0000_early_marrow.sql`, the
-original users-table migration, plus a `meta/` snapshot/journal Drizzle Kit
-manages itself — don't hand-edit those). Workflow: edit `schema.ts` → `npm
-run db:generate -w packages/server` (writes a new numbered migration file)
-→ `npm run db:migrate -w packages/server` (applies it to the real,
-cloud-hosted Supabase Postgres via `DATABASE_URL` in `packages/server/
-.env` — there is no local/throwaway DB, this applies to the real database).
-DB client: `packages/server/src/db/client.ts` exports `db` (the Drizzle
-instance, already wired to the schema) and `pool` (the raw `pg` Pool).
+**Determinism proof requirement — the acceptance bar for this session, not
+optional:** `scripts/determinism-check.ts` (17 assertions, currently
+passing) must pass **unchanged** after this work, with no assertion
+edits. That script proves the same `(seed, inputLog)` replays to the same
+result — if the fixed-virtual-resolution refactor is correct, it changes
+WHERE things render, never WHAT a given `(seed, inputLog)` replays to, so
+a passing, untouched determinism suite is direct evidence the refactor
+didn't change simulation behavior, not just that it didn't crash. If
+making this pass requires editing its assertions, that's a signal the
+refactor changed behavior it shouldn't have — stop and report that,
+don't adjust the test to match.
 
-**Auth context for a wallet route.** `packages/server/src/auth/
-middleware.ts`'s `requireAuth` (already used by the existing `/api/auth`
-routes) rejects unauthenticated requests and attaches `req.userId` from a
-verified session cookie — the pattern a wallet/balance route should follow,
-not a new auth mechanism.
+**Cleanup, do once the seed question is definitively closed (this
+session or before it, whichever comes first) — not a blocker for
+starting the viewport work itself:** remove the `TEMPORARY DIAGNOSTIC`
+logging added session 18 (`packages/server/src/matchmaking/matches.ts`'s
+`createMatch` and `submitScore`, and `packages/client/src/game-loader/
+MatchLoader.tsx`'s `gameOver` handler) once a live match has actually
+been reproduced with the width+seed logging in place and confirmed both
+sides received the identical seed. If that hasn't happened yet when this
+session starts, do it first — a few minutes, and it's the last actual
+gap in the seed-identity story (currently proven by code, not yet by a
+live log line for a real divergent-score match).
 
-**Verified via grep before writing this brief:** no `wallet`/`ledger`/
-`balance`/`stake`/`escrow` code exists anywhere in `packages/` today — the
-only hits are two comments (a Known Gaps cross-reference in `matches.ts`,
-and this file's own prose) — confirming the PLANNED label below is
-accurate, not stale.
+**Before coding: give a plan** (files, in order — including where the
+shared virtual-resolution constant + scale-transform helper lives, and
+confirming or changing the 1280x720 default) and wait for go-ahead,
+matching how every other session in this file's log has worked.
 
-**Before coding: give a plan** (files, in order — including the exact
-ledger table schema you're proposing, and how a balance gets read: a live
-`SUM()` query vs. a maintained-and-reconciled cache, per the invariant
-above) and wait for go-ahead, matching how every other session in this
-file's log has worked.
+**Wallet part 1 (the ledger) is next after this, not abandoned** — its
+full brief (money-representation rules, current schema, migration
+workflow) was written in session 18's log entry and in "Product
+direction" further down this file; re-derive it from those sources (or
+ask) when it becomes next again rather than assuming this brief still
+reflects current status.
 
 ## 60-second status (read only this to get oriented)
 
@@ -455,18 +470,29 @@ file-layout-convention question (Q1) is still unanswered.
 below for the full business/product context this comes from):**
 1. ~~Server-side score validation~~ ✅ **done, session 16** — see the
    "Server-side score validation + winner determination" BUILT entry
-   above. One real gap this surfaced that's now a hard prerequisite for
-   item 3 (stakes) below, not yet scheduled: viewport-coupled gameplay
-   simulation is a STAKES BLOCKER, see Known Gaps.
-2. **Wallet part 1: the ledger, points only — NEXT SESSION.**
-3. Wallet part 2: stakes and escrow. Do not build this before the
-   viewport/simulation-determinism Known Gaps entry is resolved —
-   confirmed live session 18 (a real match, zero deliberate action by
-   either player, produced a 41% score gap from ordinary window-size
-   difference alone; see Known Gaps for the measured ~0.1 pts/px slope
-   and the open letterbox-vs-stretch question that needs answering
-   before that work starts). No longer theoretical.
-4. Invites + per-game live player counts.
+   above. Surfaced the gap that's now item 2.
+2. **Fixed virtual resolution (viewport decoupling), all 3 games,
+   letterbox — NEXT SESSION.** Reordered ahead of wallet part 1,
+   session 18, after confirming this gap live (a real match, zero
+   deliberate action by either player, produced a 41% score gap from
+   ordinary window-size difference alone — see Known Gaps for the
+   measured ~0.1 pts/px slope). Reasoning for the reorder, the user's
+   own: escrow will eventually settle real payouts on match results
+   that server-side validation (session 16) already treats as
+   authoritative — building wallet part 1's ledger now, then wallet
+   part 2's stakes/escrow on top of it later, then discovering the
+   underlying match-result foundation was still viewport-tainted, means
+   rebuilding the foundation right after finishing the layer above it.
+   Fix the foundation first.
+3. Wallet part 1: the ledger, points only. (Brief for this session was
+   written in full at the top of this file as of session 18's close;
+   superseded from "next" by item 2 above, not abandoned — re-derive
+   from "Product direction"'s money-representation rules and
+   `packages/server/src/db/schema.ts` when this becomes next again, or
+   check session 18's log entry for the full brief as it stood.)
+4. Wallet part 2: stakes and escrow. Blocked on item 2 (viewport) being
+   resolved first — that's the whole reason for the reorder above.
+5. Invites + per-game live player counts.
 
 This replaces the "candidate next steps, none picked" framing that used
 to be here — the order above is now decided, not a menu.
@@ -1036,82 +1062,72 @@ block shipping this publicly or handling real money:
   proof plus the new logging is what actually settles seed identity;
   the score-gap match against the measured width-vs-score slope is
   what settles cause.
-  **The real fix, not done this session (asked for a sizing estimate,
-  not the work): decouple gameplay simulation from the real viewport
-  entirely — a fixed virtual resolution for all simulation math,
-  scaled only at render time.** Roughly sized per game, based on the
-  exact call sites read this session:
-  - **Pixel Ninja Dash: smallest job.** Simulation already doesn't use
-    width/height at all (confirmed above) — this is purely a `draw()`
-    change (wrap existing draw calls in a scale transform from a fixed
-    virtual resolution to the real canvas size). Low risk.
-  - **Neon Runner: moderate.** A handful of call sites — the `playerX`
-    getter, obstacle spawn x, `groundY` (from height) — swap `this.width`/
-    `this.height` for fixed constants inside simulation code, keep the
-    real size for `draw()`'s scale transform only.
-  - **Sky Dodge: moderate, slightly more surface than Neon Runner.**
-    Same idea, but width is read in more places — `resize()`'s clamp,
-    `reset()`'s initial `playerX`, `spawnHazard()`, and `update()`'s
-    clamp — meaning the "simulation width" vs. "render width" split has
-    to be threaded through 4 call sites instead of 2-3.
+  **The fix — DECIDED, session 18, letterbox, NEXT SESSION: decouple
+  gameplay simulation from the real viewport entirely, a fixed virtual
+  resolution for all simulation math, scaled only at render time via
+  uniform letterboxing (not stretch — stretch was considered and
+  rejected, see below).** Roughly sized per game, based on the exact
+  call sites re-verified fresh this session (correcting one gap in the
+  original session-16 reading, see the Sky Dodge entry):
+  - **Pixel Ninja Dash: smallest job.** The `playerX` getter does read
+    `this.width`, but every call site is either inside `draw()` or
+    `spawnParticles()` (cosmetic particle spawn position only — never
+    feeds into score, collision, timing, or the gameplay RNG stream,
+    confirmed by re-reading every call site: `spawnParticles` itself,
+    the "gate marker" section of `draw()`, and the player-sprite draw).
+    Nothing in this engine's simulation outcome depends on width or
+    height. This is purely a `draw()`-side change (wrap existing draw
+    calls in a scale transform from the fixed virtual resolution to the
+    real canvas size). Low risk.
+  - **Neon Runner: moderate, width only.** `playerX` getter and
+    obstacle spawn x both read `this.width` — swap for a fixed
+    constant inside simulation code, keep the real size for `draw()`'s
+    scale transform only. `resize()` also sets `this.groundY =
+    height * 0.78`, BUT height provably cancels out of every collision
+    check — both the hurdle check (`playerBottom > hurdleTop`) and the
+    overhang check (`playerTop < gapTop`) compare two groundY-relative
+    quantities, so groundY's absolute value never changes the outcome,
+    only where things get drawn. Height is a non-issue for this engine.
+  - **Sky Dodge: moderate, width AND height — corrected from the
+    original session-16 reading, which only flagged width.** Width:
+    `resize()`'s clamp, `reset()`'s initial `playerX`, `spawnHazard()`'s
+    x placement, `update()`'s clamp — 4 call sites. **Height also
+    genuinely matters here, unlike Neon Runner:** the `shipY` getter
+    returns `this.height - 60`, an ABSOLUTE position (not relative to
+    anything that cancels), and hazards fall from `y: -size` toward
+    `shipY` at a fixed `fallSpeed` — so the vertical distance a hazard
+    travels before it can hit the ship is a direct function of
+    viewport height. A taller viewport means more fall-time margin to
+    react, the same class of unfair advantage as Neon Runner's width
+    sensitivity, just on the other axis. (The hazard-cull threshold
+    also reads `this.height`, but that's pure array cleanup well after
+    a hazard has passed off-screen — not gameplay-relevant.) Both axes
+    need the simulation/render split here, not just width.
   - **Cross-cutting, small:** a shared virtual-resolution constant +
     scale-transform helper (`packages/shared` is the natural home,
     alongside `fixedTimestepLoop.ts`/`rng.ts`); once done, the
-    `viewport` plumbing this session added (adapters' `resize()` step,
-    `GameOverPayload.viewport`) becomes vestigial for replay-correctness
-    purposes — simulation would no longer need to know the real size at
-    all — though it might be worth keeping for telemetry.
-  **OPEN QUESTION — answer before that session starts, not during it:
-  letterbox or stretch, when a fixed virtual resolution meets an
-  arbitrary real device aspect ratio (a phone in portrait vs. an
-  ultrawide monitor)?**
-  - **Option A — letterbox.** Uniform scale (`scaleX === scaleY`) fit
-    to the smaller axis, centered, bars (in the app's own background
-    color, not literal black) fill the rest.
-    - *For:* the only option that fully closes THIS gap with a clean,
-      one-line correctness argument — a uniform scale factor preserves
-      every proportion and hit-target size exactly, on every device, no
-      exceptions to reason about. Matches how most competitive/esports
-      games handle arbitrary aspect ratios, so it won't read as
-      unfamiliar.
-    - *Against:* wastes screen space — how much depends on how far a
-      real device's aspect ratio sits from the chosen virtual
-      resolution's. A narrow phone in portrait against a
-      landscape-oriented virtual resolution could end up with a small
-      played area and large bars, which may read as unpolished or
-      un-immersive specifically on the device class most likely to be
-      touch/mobile players (the same population already narrowed to
-      keyboard-only in Sky Dodge's match mode this session — worth
-      weighing together, not independently).
-  - **Option B — non-uniform stretch.** Fill the whole container,
-    `scaleX` and `scaleY` allowed to differ.
-    - *For:* always fills the screen, no wasted space, feels more
-      full-bleed on any device.
-    - *Against:* distorts shapes and, more importantly, **only
-      partially closes the gap this fix exists to close.** Two players
-      on different aspect ratios still see different effective
-      hit-target proportions under stretch — smaller in magnitude than
-      today's raw-pixel-count problem, but the same *kind* of problem,
-      now expressed as shape distortion instead of a score gap. Harder
-      to make a clean "this is fair now" argument for the same reason
-      letterboxing's argument is easy: there's no single scale factor
-      to point at.
-  - **Recommendation, not a decision:** Option A. It's the only one of
-    the two that actually satisfies "monitor size doesn't decide
-    matches" without a residual asterisk. But this has a real product
-    cost (wasted space, especially on mobile) that's legitimately a
-    call about how the app should feel, not a pure correctness
-    question — flagging the recommendation, not assuming it answers
-    the question.
-  - **One coupled sub-decision, smaller, worth one line here rather
-    than its own question:** which virtual resolution to standardize
-    on. This session's own replay-adapter tests already used 1280x720
-    as a stand-in canonical size — reasonable as a starting default,
-    not yet confirmed as the actual answer.
-  **Overall scope: a well-contained, roughly half-a-session job now
-  that the exact call sites are known (listed above) — most of it
-  mechanical — gated on the open question above being answered first,
-  not during the session.**
+    `viewport` plumbing sessions 16-18 added (adapters' `resize()` step,
+    `GameOverPayload.viewport`, the temporary diagnostic logging)
+    becomes vestigial for replay-correctness purposes — simulation
+    would no longer need to know the real size at all — though the
+    field might be worth keeping for telemetry.
+  **Letterbox vs. stretch — DECIDED session 18: letterbox.** Not a
+  recommendation anymore. Reasoning, confirmed by the user: stretch
+  doesn't remove the advantage, it just converts it into a subtler
+  form — same simulation, different on-screen reaction distances, so a
+  wide monitor still wins, just via distorted hit-target geometry
+  instead of a raw score gap. Only a uniform scale (fit to the smaller
+  axis, centered, bars in the app's own background color) actually
+  satisfies "monitor size doesn't decide matches." Implementation:
+  uniform `scaleX === scaleY`, fit to the smaller axis, centered.
+  **One still-open, smaller sub-decision:** which virtual resolution to
+  standardize on. Sessions 16-18's own test fixtures used 1280x720 as a
+  stand-in — reasonable as a starting default, not yet confirmed as the
+  actual answer; fine to decide at the start of that session rather
+  than needing it answered here.
+  **Overall scope: a well-contained, roughly half-a-session job — the
+  open design question is now closed, so nothing should block that
+  session from starting.**
 
 ## Project summary
 
@@ -2485,27 +2501,73 @@ client console — the next reproduction settles seed identity directly
 from logs instead of by inference.
 
 **Scoped the eventual fix without building it, per explicit
-instruction.** The per-game call-site breakdown from session 16 still
-holds (Pixel Ninja Dash: `draw()`-only, smallest; Neon Runner:
-moderate, ~3 call sites; Sky Dodge: moderate, ~4 call sites) — see
-Known Gaps. Wrote the letterbox-vs-stretch tradeoff as an explicit,
+instruction.** Wrote the letterbox-vs-stretch tradeoff as an explicit,
 answerable question rather than prose, since the user asked to be able
-to answer it before that session starts rather than during it:
-letterbox fully closes the gap with a clean correctness argument but
-costs screen space (worse on the mobile/touch population already
-narrowed by Sky Dodge's keyboard-only match mode); stretch fills the
-screen but only partially closes the gap, reopening a smaller version
-of the same "different players, different game" problem as shape
-distortion instead of a score gap. Recommended letterbox, explicitly
-labeled as a recommendation rather than a decision — flagged as a real
-product-feel tradeoff, not purely a correctness question.
+to answer it before that session starts rather than during it, and
+recommended letterbox — explicitly labeled as a recommendation, not a
+decision, at the time.
 
 `tsc -b`(client)/`tsc --noEmit`(server) clean. Re-ran all three
 `scripts/` test scripts per the standing rule: `determinism-check.ts`
 17/17, `score-validation-check.ts` 25/25, `matchmaking-check.ts` all
 checks passed — the new diagnostic `console.log` lines don't touch any
-assertion path. No commits made this session — ask before committing,
-per standing instruction.
+assertion path.
+
+**Same-day close-out, same session:** three things happened in
+sequence.
+
+1. **Letterbox confirmed as the decision, not a recommendation** — the
+   user's own reasoning: stretch doesn't remove the unfairness, it
+   converts it into a subtler form (same simulation, different
+   on-screen reaction distances via distorted hit-target geometry — a
+   wide monitor still wins, just less visibly). Updated the Known Gaps
+   entry to say DECIDED, not open.
+
+2. **Re-verified the per-game call sites fresh rather than trust the
+   prior summary in this same entry, and found a real gap in it:** the
+   original pass (and the sentence a few paragraphs up in this very
+   entry) only flagged Sky Dodge for WIDTH. Re-reading `games/
+   sky-dodge/engine.ts` found the `shipY` getter (`this.height - 60`,
+   an absolute position, doesn't cancel like Neon Runner's groundY
+   does) directly controls how long a falling hazard takes to reach the
+   player — **height matters for Sky Dodge's gameplay outcome, not just
+   width, and this wasn't stated anywhere before now.** Also confirmed,
+   this time precisely: Pixel Ninja Dash's `playerX` getter does read
+   `this.width` (missed emphasizing this distinction earlier), but every
+   call site is `draw()`-only or cosmetic-particle-only, never
+   score/collision-relevant — the "not affected" conclusion holds, just
+   wanted to state exactly why rather than assert it. Neon Runner's
+   height/groundY cancellation was re-verified algebraically, holds.
+   Corrected the Known Gaps entry and the new brief below to reflect
+   this accurately — flagging the correction itself here since a wrong
+   scoping estimate silently carried into a "zero prior context" brief
+   is exactly the kind of thing worth catching, not just fixing quietly.
+
+3. **ROADMAP reordered: viewport decoupling moves ahead of wallet part
+   1** — the user's reasoning, recorded so it isn't re-litigated:
+   escrow will eventually settle real payouts on the match `outcome`
+   session 16's validator already treats as authoritative; building the
+   ledger now, then stakes on top of it later, only to find the
+   match-result foundation still viewport-tainted, means rebuilding the
+   foundation right after finishing the layer on top of it. The
+   previous "NEXT SESSION: WALLET PART 1" brief at the top of this file
+   was removed (same convention as every prior superseded brief — see
+   session 15's log) and replaced with "NEXT SESSION: FIXED VIRTUAL
+   RESOLUTION," self-contained, including the measured evidence, the
+   corrected per-game call sites above, the determinism-suite-must-
+   pass-unchanged acceptance bar, and a note to remove the temporary
+   diagnostic logging once the seed question is closed by a live
+   reproduction. Wallet part 1's brief content isn't lost — it's in
+   this log entry's own history and in "Product direction" further
+   down, to be re-derived when that session is next again.
+
+Re-ran all three `scripts/` test scripts once more after the diagnostic
+logging changes: `determinism-check.ts` 17/17, `score-validation-
+check.ts` 25/25, `matchmaking-check.ts` all checks passed. **Committed
+twice this session**, per explicit instruction — previously-uncommitted
+work does not accumulate silently: one commit for the diagnostic
+investigation (logging + Known Gaps writeup), one for this close-out
+(letterbox decision, ROADMAP reorder, the new next-session brief).
 
 ## Decisions / tradeoffs (read before changing structure)
 
