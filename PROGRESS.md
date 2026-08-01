@@ -3,7 +3,103 @@
 Self-contained handoff doc. Read this first at the start of every session —
 conversations don't carry over, and work may resume from a different tool.
 
-## NEXT SESSION: FIXED VIRTUAL RESOLUTION — decouple all 3 games' simulation from real viewport size, letterbox
+**TOP PRIORITY, UNDIAGNOSED: the user reports Sky Dodge does not work when
+played. Nobody has investigated yet — see the next section, and "STILL
+UNVERIFIED" further down, before doing anything else this session.**
+
+## NEXT SESSION: DIAGNOSE AND FIX SKY DODGE — diagnose first, don't guess
+
+This section is written for zero prior context — read it alone and you have
+enough to start. The rest of this file is full project history/detail for
+"why"; skim it only if you need that. (Remove this section once this
+session actually starts, same convention as every prior "NEXT SESSION"
+brief — see session 13's, session 16's, and session 18's log entries for
+precedent.)
+
+**What this session does, in order: diagnose, THEN fix. Not the reverse.**
+Report what you actually find before touching any code. Do not guess at a
+cause and start editing — the whole point of this brief is that session 19
+(2026-07-31) recorded the report without investigating it, specifically so
+the next session starts with a clean, unbiased look rather than inheriting
+someone else's half-formed theory. Treat everything under "candidates to
+check" below as exactly that — unverified candidates, not findings. Confirm
+or rule out each one by actually checking, not by which one sounds most
+plausible.
+
+**What's KNOWN (this is genuinely all there is — read this literally, don't
+infer more than it says):** the user reported that Sky Dodge "completely
+does not work" when they tried to play it. That is the entire report.
+
+**What's UNKNOWN — establish these first, before looking at any code:**
+- Whether it fails in practice mode, match mode, or both.
+- What "does not work" actually looks like: blank screen, a crash/console
+  error, the game mounts but controls don't respond, visual corruption,
+  something else entirely. Ask the user directly if it's not obvious from
+  testing — don't assume a failure mode.
+- Whether it EVER worked. This determines whether you're hunting for a
+  regression (check recent session diffs first) or a pre-existing bug that
+  was never actually verified working in the first place (see the
+  verification-method caveats already on file for Sky Dodge below).
+
+**Candidates to check first — UNVERIFIED, listed by suspicion, not by
+confirmed relevance. Check each one, don't assume the first on this list is
+the answer:**
+1. **Session 16's match-mode drag-disable** (`games/sky-dodge/index.ts`'s
+   `handlePointerDown`/`handlePointerMove` now no-op when `mode ===
+   "match"`, added to make match runs fully keyboard-replayable). If Sky
+   Dodge's keyboard controls (`ArrowLeft`/`ArrowRight`/`Space`) were ever
+   incomplete, unbound, or buggy — and drag was silently carrying the game
+   in practice — disabling drag in match mode would leave match mode with
+   no usable input at all. This is the most recent, most specific change
+   to this exact file and the first thing worth ruling in or out.
+2. **The fixed-timestep loop** (session 13) replacing whatever drove the
+   game before it — older and more foundational, lower suspicion, but
+   `determinism-check.ts`'s Sky Dodge assertions passing (see below) is
+   evidence for the ENGINE side of this, not the DOM/lifecycle side.
+3. **The RNG stream change** (session 13) — same era as #2, same caveat.
+4. **Pause gating** (sessions 16-17, `pause()` now no-ops in match mode;
+   the pause button is replaced with a Forfeit control in match mode). If
+   this broke something in the button-creation/DOM-wiring path, it could
+   plausibly affect the whole module, not just pausing specifically.
+
+**One verified fact worth starting from, not a conclusion:**
+`scripts/determinism-check.ts` (currently 17/17, includes Sky Dodge
+assertions) proves `DodgeEngine`'s SIMULATION logic replays deterministically
+and correctly, headless, no DOM. If the reported failure is real, this
+narrows likely territory toward `games/sky-dodge/index.ts` (DOM mounting,
+input wiring, canvas setup, rendering) rather than `engine.ts` (physics/
+collision/scoring) — but verify this rather than assume it; a determinism
+pass doesn't prove the DOM layer calls the engine correctly, only that the
+engine is internally consistent when driven correctly.
+
+**Known, pre-existing verification gaps specific to Sky Dodge — read before
+assuming "it worked before, so it's a clean regression":** PROGRESS.md has
+flagged, across multiple past sessions, that Sky Dodge's pointer-drag path
+specifically was "not re-exercised in browser" as of session 13's loop
+refactor (see "STILL UNVERIFIED" further down) — meaning even the drag path
+this bug report might be about was already sitting on unconfirmed ground
+before session 16 touched it further. Don't assume a clean "this used to
+work" baseline without checking what was actually verified when.
+
+**This sandbox's Browser-pane tool cannot drive real gameplay** (documented
+since session 4 — `requestAnimationFrame` never fires here). Diagnosing this
+will likely require either the user's own browser testing with specific
+questions to narrow the failure mode, or careful code reading plus targeted
+temporary diagnostic logging (same pattern as session 18's viewport
+investigation) rather than trying to reproduce the bug yourself in this
+tool.
+
+**Report findings first.** Once you know what's actually broken and why,
+report it before fixing — this may be a one-line bug or it may reopen a
+design question (e.g., if keyboard controls were always incomplete, that's
+a different, larger conversation than a wiring bug).
+
+## SESSION AFTER THAT: FIXED VIRTUAL RESOLUTION — decouple all 3 games' simulation from real viewport size, letterbox
+
+**Pushed down one slot, session 19, by the Sky Dodge bug report above — a
+completely broken game is a higher priority than a viewport-fairness gap.
+Everything below is unchanged from when it was written as the immediate
+next session; still accurate, just not first anymore.**
 
 This section is written for zero prior context — read it alone and you have
 enough to start. The rest of this file is full project history/detail for
@@ -380,6 +476,21 @@ further down for the full audit):**
 
 **STILL UNVERIFIED (built, but confirmation is incomplete — don't assume
 these work just because the code looks right):**
+- **UNDIAGNOSED BUG, TOP PRIORITY, session 19 (2026-07-31): Sky Dodge does
+  not work when played, per direct user report. Nothing below has been
+  checked — this is a report, not a diagnosis.** See "NEXT SESSION:
+  DIAGNOSE AND FIX SKY DODGE" at the top of this file for the full brief;
+  summarized here for the record. Known: the user reported it "completely
+  does not work." Unknown: whether it fails in practice mode, match mode,
+  or both; what the failure actually looks like (blank screen, crash, no
+  controls, visual breakage); whether it ever genuinely worked. Candidates
+  to check, none verified: session 16's match-mode drag-disable
+  (`games/sky-dodge/index.ts`, possibly leaving match mode with no usable
+  input if keyboard controls are incomplete); the fixed-timestep loop
+  (session 13); the RNG stream change (session 13); pause gating (sessions
+  16-17). Do not assume any of these is the cause without checking — this
+  bullet exists to make sure the report itself is on record, not to
+  pre-judge a fix.
 - **Live rAF-driven gameplay (actual real-time score progression,
   animation, collisions) has never been observed working** — this
   Browser-pane tool's tab reports `document.hidden = true` (confirmed via
@@ -470,29 +581,37 @@ file-layout-convention question (Q1) is still unanswered.
 below for the full business/product context this comes from):**
 1. ~~Server-side score validation~~ ✅ **done, session 16** — see the
    "Server-side score validation + winner determination" BUILT entry
-   above. Surfaced the gap that's now item 2.
-2. **Fixed virtual resolution (viewport decoupling), all 3 games,
-   letterbox — NEXT SESSION.** Reordered ahead of wallet part 1,
-   session 18, after confirming this gap live (a real match, zero
-   deliberate action by either player, produced a 41% score gap from
-   ordinary window-size difference alone — see Known Gaps for the
-   measured ~0.1 pts/px slope). Reasoning for the reorder, the user's
-   own: escrow will eventually settle real payouts on match results
-   that server-side validation (session 16) already treats as
+   above. Surfaced the gap that's now item 3.
+2. **Sky Dodge is undiagnosed-broken — TOP PRIORITY, NEXT SESSION,
+   session 19.** The user reported it "completely does not work."
+   Nobody has investigated yet — see "NEXT SESSION: DIAGNOSE AND FIX
+   SKY DODGE" at the top of this file and the matching "STILL
+   UNVERIFIED" entry. Jumped ahead of everything else, including the
+   viewport fix below, on the obvious reasoning that a completely
+   broken game outranks a fairness gap in a game that at least works.
+3. **Fixed virtual resolution (viewport decoupling), all 3 games,
+   letterbox — session after Sky Dodge is fixed.** Reordered ahead of
+   wallet part 1, session 18, after confirming this gap live (a real
+   match, zero deliberate action by either player, produced a 41% score
+   gap from ordinary window-size difference alone — see Known Gaps for
+   the measured ~0.1 pts/px slope), then pushed one further slot by
+   item 2 above, session 19. Reasoning for the wallet reorder, the
+   user's own: escrow will eventually settle real payouts on match
+   results that server-side validation (session 16) already treats as
    authoritative — building wallet part 1's ledger now, then wallet
    part 2's stakes/escrow on top of it later, then discovering the
    underlying match-result foundation was still viewport-tainted, means
    rebuilding the foundation right after finishing the layer above it.
    Fix the foundation first.
-3. Wallet part 1: the ledger, points only. (Brief for this session was
+4. Wallet part 1: the ledger, points only. (Brief for this session was
    written in full at the top of this file as of session 18's close;
-   superseded from "next" by item 2 above, not abandoned — re-derive
-   from "Product direction"'s money-representation rules and
+   superseded from "next" by items 2-3 above, not abandoned —
+   re-derive from "Product direction"'s money-representation rules and
    `packages/server/src/db/schema.ts` when this becomes next again, or
    check session 18's log entry for the full brief as it stood.)
-4. Wallet part 2: stakes and escrow. Blocked on item 2 (viewport) being
-   resolved first — that's the whole reason for the reorder above.
-5. Invites + per-game live player counts.
+5. Wallet part 2: stakes and escrow. Blocked on item 3 (viewport) being
+   resolved first — that's the whole reason for that reorder.
+6. Invites + per-game live player counts.
 
 This replaces the "candidate next steps, none picked" framing that used
 to be here — the order above is now decided, not a menu.
@@ -2568,6 +2687,47 @@ twice this session**, per explicit instruction — previously-uncommitted
 work does not accumulate silently: one commit for the diagnostic
 investigation (logging + Known Gaps writeup), one for this close-out
 (letterbox decision, ROADMAP reorder, the new next-session brief).
+
+### Session 19 (2026-07-31) — Recorded a new bug report: Sky Dodge doesn't work. Documentation only, no investigation.
+
+Same-day. The user reported that Sky Dodge "completely does not work"
+when played. Explicit instruction: record the report, do NOT investigate
+or fix it this session — no code was read or changed. The point of
+holding off is that the next session should start with a clean, unbiased
+look, not inherit a half-formed theory from a session that was told
+upfront not to dig in.
+
+**Recorded exactly what's known and nothing more:** the user's report,
+verbatim in substance ("completely does not work"). Explicitly listed as
+UNKNOWN, not investigated: practice vs. match vs. both; what the failure
+actually looks like; whether it ever worked. Listed four candidates to
+check first, all explicitly unverified — session 16's match-mode
+drag-disable (first suspicion, most recent and most specific change to
+this exact file), the fixed-timestep loop (session 13), the RNG stream
+change (session 13), pause gating (sessions 16-17) — none confirmed,
+none ruled out, deliberately, per instruction.
+
+**Priority: promoted to top, ahead of fixed virtual resolution.** A
+completely broken game outranks a fairness gap in a game that at least
+works. ROADMAP renumbered (Sky Dodge is now item 2, viewport pushed to
+item 3, wallet items shift down accordingly). The "NEXT SESSION: FIXED
+VIRTUAL RESOLUTION" brief was NOT deleted or shortened — moved down
+intact under a new "SESSION AFTER THAT" heading with a one-line note
+explaining why it moved, exactly as instructed. New "NEXT SESSION:
+DIAGNOSE AND FIX SKY DODGE" brief written above it, explicit that
+diagnosis comes before any fix and findings get reported before code
+changes — the same discipline this session itself was asked to follow
+for viewport, now written down as the standing instruction for whoever
+opens this file next.
+
+Also corrected `GAMES.md`'s Sky Dodge row, which still said "BUILT —
+practice + for-fun matchmaking" with no caveat — flagged it against
+PROGRESS.md now that the two would otherwise directly contradict each
+other, one of this project's two primary "read first" documents.
+
+Re-ran all three `scripts/` test scripts (unaffected — no code changed
+this session): `determinism-check.ts` 17/17, `score-validation-check.ts`
+25/25, `matchmaking-check.ts` all checks passed. Committed.
 
 ## Decisions / tradeoffs (read before changing structure)
 

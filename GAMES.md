@@ -13,7 +13,7 @@ audit this file's wording was corrected against.
 |---|---|---|---|
 | Neon Runner | [`games/neon-runner/`](games/neon-runner/) | runner | BUILT — practice + for-fun matchmaking |
 | Pixel Ninja Dash | [`games/pixel-ninja-dash/`](games/pixel-ninja-dash/) | reflex-timing | BUILT — practice + for-fun matchmaking |
-| Sky Dodge | [`games/sky-dodge/`](games/sky-dodge/) | falling-block | BUILT — practice + for-fun matchmaking |
+| Sky Dodge | [`games/sky-dodge/`](games/sky-dodge/) | falling-block | ⚠️ **REPORTED BROKEN, session 19 — see PROGRESS.md "STILL UNVERIFIED"** (undiagnosed; "BUILT" below refers to what's in code, not a current working-state guarantee) |
 
 **On "for-fun matchmaking" (session 15, see PROGRESS.md) — read the
 verification confidence carefully, it is not uniform.** Session 15
