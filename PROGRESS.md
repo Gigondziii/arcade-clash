@@ -460,9 +460,12 @@ below for the full business/product context this comes from):**
    simulation is a STAKES BLOCKER, see Known Gaps.
 2. **Wallet part 1: the ledger, points only — NEXT SESSION.**
 3. Wallet part 2: stakes and escrow. Do not build this before the
-   viewport/simulation-determinism Known Gaps entry is resolved — a
-   wagered match is currently exploitable by resizing the browser
-   window.
+   viewport/simulation-determinism Known Gaps entry is resolved —
+   confirmed live session 18 (a real match, zero deliberate action by
+   either player, produced a 41% score gap from ordinary window-size
+   difference alone; see Known Gaps for the measured ~0.1 pts/px slope
+   and the open letterbox-vs-stretch question that needs answering
+   before that work starts). No longer theoretical.
 4. Invites + per-game live player counts.
 
 This replaces the "candidate next steps, none picked" framing that used
@@ -886,7 +889,10 @@ block shipping this publicly or handling real money:
   against a modified client is a fundamentally different, harder
   problem than anything shipped across sessions 16-17 (client-side UI
   changes can't solve it by construction) and remains not started.
-- **No reconnection window — STAKES BLOCKER, session 17.** As of session
+- **No reconnection window — STAKES BLOCKER, session 17. Second
+  priority of the two STAKES BLOCKER entries in this section** — see
+  the viewport entry below, confirmed live with real numbers session
+  18, fix that one first. As of session
   17's disconnect-resolution fix (see the BUILT entry above and that
   session's log), a mid-match socket disconnect resolves the match
   immediately as a loss for the disconnecting player, with no grace
@@ -945,9 +951,11 @@ block shipping this publicly or handling real money:
   wins by forfeit instead — session 16 didn't change forfeit behavior,
   only what happens once a score IS submitted.
 - **Viewport size feeds gameplay simulation directly, in 2 of 3 games —
-  STAKES BLOCKER, do not build stakes/escrow until this is fixed.**
-  Discovered while building session 16's score validator, reading
-  `RunnerEngine`/`DodgeEngine` (not just the interface): both use
+  now CONFIRMED LIVE, session 18, and promoted to the highest-priority
+  STAKES BLOCKER (ahead of the no-reconnection-window entry above).**
+  Fix this one first. Discovered while building session 16's score
+  validator, reading `RunnerEngine`/`DodgeEngine` (not just the
+  interface): both use
   `this.width` in code that determines WHEN a collision happens —
   `RunnerEngine`'s obstacle spawn x (`this.width + 40`) and `playerX`
   (`this.width * xFraction`) together set how long an obstacle takes to
@@ -987,6 +995,47 @@ block shipping this publicly or handling real money:
   fixing it properly means logging resize events the same way `inputLog`
   logs actions, which is really the same underlying problem as the
   paragraph below.
+  **Session 18: this stopped being theoretical.** A real two-client
+  match with zero input from both sides produced scores of 221 and 157
+  in Neon Runner — reported by the user, diagnosed by the assistant.
+  Measured (not estimated) by replaying `RunnerEngine` headless, same
+  seed, empty inputLog, across a swept range of widths: **score is
+  approximately linear in canvas width, ~0.1 points per pixel.** A
+  player on a 1920px-wide screen scores roughly **33% higher** than one
+  on 1280px with *identical play* — confirmed both by the width sweep
+  (score 261 at 1920px vs. 195 at 1280px) and by working the reported
+  221/157 backward through that same ~0.1 pts/px slope, which lands on
+  ~1560px and ~920px — a maximized browser window vs. a default,
+  never-resized incognito window. **Neither client did anything
+  unusual or deliberately exploitative — this was two people just
+  using their browsers normally, and it produced a 41% score
+  difference from window state alone.** That's what makes this the
+  higher-priority blocker of the two STAKES BLOCKER entries in this
+  section: the reconnection-window gap above requires an actual
+  disconnect to matter; this one is live on every single match, right
+  now, with zero effort from anyone — for a wagered skill product, an
+  ordinary difference in browser window habits deciding a match is
+  disqualifying on its own. Confirmed the seed genuinely was identical
+  for both clients (not a second bug wearing this one's clothes) two
+  ways: by code — `packages/server/src/matchmaking/index.ts`'s single
+  `generateSeed()` call feeds both `matched` emits from the same
+  variable, no path exists for divergence — and by a temporary
+  diagnostic log added to `createMatch` and `submitScore`
+  (`packages/server/src/matchmaking/matches.ts`, marked `TEMPORARY
+  DIAGNOSTIC`, remove once this is resolved) that now prints both
+  sides' seed and viewport on both the server console and each client's
+  own browser console, so the next reproduction settles it directly
+  from logs rather than by inference. **One caveat on the diagnosis
+  itself, worth stating plainly: a zero-input run is seed-independent**
+  (every seed tested produced the identical score at a given width,
+  since a standing, never-jumping, never-sliding player collides with
+  the first obstacle regardless of its type or spawn jitter) — so the
+  zero-input test that surfaced this bug could not, by itself, have
+  told the difference between "same seed, different width" and "
+  different seed" if that had been the actual cause. The code-level
+  proof plus the new logging is what actually settles seed identity;
+  the score-gap match against the measured width-vs-score slope is
+  what settles cause.
   **The real fix, not done this session (asked for a sizing estimate,
   not the work): decouple gameplay simulation from the real viewport
   entirely — a fixed virtual resolution for all simulation math,
@@ -1012,20 +1061,57 @@ block shipping this publicly or handling real money:
     `GameOverPayload.viewport`) becomes vestigial for replay-correctness
     purposes — simulation would no longer need to know the real size at
     all — though it might be worth keeping for telemetry.
-  - **Not mechanical, needs a decision first: letterbox vs. stretch.**
-    Mapping one fixed virtual resolution onto arbitrary real device
-    aspect ratios (a phone in portrait vs. a wide monitor) means either
-    uniform scaling + centering with bars (preserves proportions/hit-
-    target sizes exactly across devices, wastes screen space) or
-    non-uniform stretching (fills the screen, distorts shapes and
-    effective hit-target sizes — which is itself a smaller version of
-    the same "different players get different games" problem this fix
-    exists to solve, just less severe). This is a visual/product call,
-    not something to assume an answer to.
-  **Overall: a well-contained, roughly half-a-session job now that the
-  exact call sites are known — most of it mechanical — plus one design
-  decision (letterbox vs. stretch) that should be made with the user
-  before writing code, not assumed.**
+  **OPEN QUESTION — answer before that session starts, not during it:
+  letterbox or stretch, when a fixed virtual resolution meets an
+  arbitrary real device aspect ratio (a phone in portrait vs. an
+  ultrawide monitor)?**
+  - **Option A — letterbox.** Uniform scale (`scaleX === scaleY`) fit
+    to the smaller axis, centered, bars (in the app's own background
+    color, not literal black) fill the rest.
+    - *For:* the only option that fully closes THIS gap with a clean,
+      one-line correctness argument — a uniform scale factor preserves
+      every proportion and hit-target size exactly, on every device, no
+      exceptions to reason about. Matches how most competitive/esports
+      games handle arbitrary aspect ratios, so it won't read as
+      unfamiliar.
+    - *Against:* wastes screen space — how much depends on how far a
+      real device's aspect ratio sits from the chosen virtual
+      resolution's. A narrow phone in portrait against a
+      landscape-oriented virtual resolution could end up with a small
+      played area and large bars, which may read as unpolished or
+      un-immersive specifically on the device class most likely to be
+      touch/mobile players (the same population already narrowed to
+      keyboard-only in Sky Dodge's match mode this session — worth
+      weighing together, not independently).
+  - **Option B — non-uniform stretch.** Fill the whole container,
+    `scaleX` and `scaleY` allowed to differ.
+    - *For:* always fills the screen, no wasted space, feels more
+      full-bleed on any device.
+    - *Against:* distorts shapes and, more importantly, **only
+      partially closes the gap this fix exists to close.** Two players
+      on different aspect ratios still see different effective
+      hit-target proportions under stretch — smaller in magnitude than
+      today's raw-pixel-count problem, but the same *kind* of problem,
+      now expressed as shape distortion instead of a score gap. Harder
+      to make a clean "this is fair now" argument for the same reason
+      letterboxing's argument is easy: there's no single scale factor
+      to point at.
+  - **Recommendation, not a decision:** Option A. It's the only one of
+    the two that actually satisfies "monitor size doesn't decide
+    matches" without a residual asterisk. But this has a real product
+    cost (wasted space, especially on mobile) that's legitimately a
+    call about how the app should feel, not a pure correctness
+    question — flagging the recommendation, not assuming it answers
+    the question.
+  - **One coupled sub-decision, smaller, worth one line here rather
+    than its own question:** which virtual resolution to standardize
+    on. This session's own replay-adapter tests already used 1280x720
+    as a stand-in canonical size — reasonable as a starting default,
+    not yet confirmed as the actual answer.
+  **Overall scope: a well-contained, roughly half-a-session job now
+  that the exact call sites are known (listed above) — most of it
+  mechanical — gated on the open question above being answered first,
+  not during the session.**
 
 ## Project summary
 
@@ -2349,6 +2435,77 @@ requirement only.
 clean (same one pre-existing unrelated warning, `AuthContext.tsx`, every
 session since it was first noticed). No commits made this session — ask
 before committing, per standing instruction.
+
+### Session 18 (2026-07-31) — Confirmed the viewport gap live: real match, zero deliberate action, 41% score gap
+
+Same-day follow-up. The user ran two real clients through an actual
+match with zero input from both sides and got Neon Runner scores of 221
+and 157 — asked for a diagnosis, not a fix, in three parts.
+
+**1. Seed issuance.** Confirmed by code — a single `generateSeed()`
+call in `packages/server/src/matchmaking/index.ts` feeds both
+`matched` emits from the same variable, no path for divergence — but
+no log line existed to confirm it against a real run. Added one
+(`TEMPORARY DIAGNOSTIC`, `createMatch` in `matches.ts`).
+
+**2. Client seed usage.** Grepped the whole client for `Math.random`/
+seed logic: exactly one hit outside the match path (`GameLoader.tsx`,
+practice mode's own client-generated seed, architecturally unreachable
+from `MatchLoader.tsx`). The match path passes `matchInfo.seed`
+straight from the raw `matched` socket payload into `GameModule.init()`
+with no client-side generation anywhere in between.
+
+**3. Viewport sensitivity, quantified.** Replayed `RunnerEngine`
+headless (same seed, empty inputLog) across swept widths. First pass
+tested ~200px gaps (matching the user's original ask) and found only a
+20-21 point / ~1.10x max gap — far short of the reported 64-point/
+1.41x gap, so the initial conclusion was "too large to explain by
+viewport alone at that scale." **User corrected this with a sharper
+read of the same data:** working the 221/157 gap backward through the
+measured ~0.1-points-per-pixel slope lands on ~1560px and ~920px — a
+maximized window vs. a default, never-resized incognito window, which
+is exactly the kind of gap a real user would produce without touching
+anything. The ~200px assumption was simply the wrong magnitude for
+this real case, not evidence against viewport as the cause. **Also
+flagged, correctly, and now recorded here: a zero-input run is
+seed-independent (every seed tested landed on the identical score at a
+given width), so the original diagnostic couldn't have distinguished
+"same seed, different width" from "different seed" even if the latter
+had been true — it only ever tested the width dimension.**
+
+**Confirmed live and promoted to the higher-priority of the two STAKES
+BLOCKER entries in Known Gaps** (ahead of session 17's no-reconnection-
+window gap) — see that section for the full writeup, not repeated here:
+the measured ~0.1 pts/px slope, the ~33%-at-1920-vs-1280 figure, and
+the real 221/157 instance as evidence this isn't theoretical. Extended
+the temporary diagnostic logging (both `createMatch` and `submitScore`
+in `matches.ts`, plus a matching client-side log in `MatchLoader.tsx`'s
+`gameOver` handler) to print viewport alongside seed on both server and
+client console — the next reproduction settles seed identity directly
+from logs instead of by inference.
+
+**Scoped the eventual fix without building it, per explicit
+instruction.** The per-game call-site breakdown from session 16 still
+holds (Pixel Ninja Dash: `draw()`-only, smallest; Neon Runner:
+moderate, ~3 call sites; Sky Dodge: moderate, ~4 call sites) — see
+Known Gaps. Wrote the letterbox-vs-stretch tradeoff as an explicit,
+answerable question rather than prose, since the user asked to be able
+to answer it before that session starts rather than during it:
+letterbox fully closes the gap with a clean correctness argument but
+costs screen space (worse on the mobile/touch population already
+narrowed by Sky Dodge's keyboard-only match mode); stretch fills the
+screen but only partially closes the gap, reopening a smaller version
+of the same "different players, different game" problem as shape
+distortion instead of a score gap. Recommended letterbox, explicitly
+labeled as a recommendation rather than a decision — flagged as a real
+product-feel tradeoff, not purely a correctness question.
+
+`tsc -b`(client)/`tsc --noEmit`(server) clean. Re-ran all three
+`scripts/` test scripts per the standing rule: `determinism-check.ts`
+17/17, `score-validation-check.ts` 25/25, `matchmaking-check.ts` all
+checks passed — the new diagnostic `console.log` lines don't touch any
+assertion path. No commits made this session — ask before committing,
+per standing instruction.
 
 ## Decisions / tradeoffs (read before changing structure)
 

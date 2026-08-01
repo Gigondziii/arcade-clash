@@ -114,6 +114,12 @@ export function isSocketInMatch(socket: MatchmakingSocket, matchId: string): boo
 }
 
 export function createMatch(gameId: string, a: QueueEntry, b: QueueEntry, seed: number): void {
+  // TEMPORARY DIAGNOSTIC — added to investigate a reported score
+  // divergence (two zero-input match clients scoring 221 vs 157), not a
+  // permanent addition. Remove once that's resolved. Confirms from a real
+  // server log line, not just code reading, that both sides of a match are
+  // issued the identical seed value.
+  console.log(`[matchmaking] DIAGNOSTIC createMatch: gameId=${gameId} seed=${seed} a=${a.username} b=${b.username}`);
   const matchId = randomUUID();
   const players: [MatchPlayer, MatchPlayer] = [
     { socket: a.socket, userId: a.userId, username: a.username, result: null },
@@ -149,6 +155,16 @@ export function submitScore(socket: MatchmakingSocket, payload: SubmitScorePaylo
 
   const player = playerFor(match, socket);
   if (!player || player.result) return; // not a participant, or a duplicate submission — ignore either way
+
+  // TEMPORARY DIAGNOSTIC — see createMatch's matching comment. One line per
+  // submission; both sides of a match share matchId+seed, so two lines with
+  // the same matchId/seed and (possibly) different viewport settle the
+  // "was it really the same seed" question directly from server console
+  // output. Remove alongside createMatch's log once resolved.
+  console.log(
+    `[matchmaking] DIAGNOSTIC submitScore: matchId=${matchId} seed=${match.seed} user=${socket.data.username} ` +
+      `viewport=${payload.viewport.width}x${payload.viewport.height} claimedScore=${payload.score}`,
+  );
 
   // match.seed, never payload.seed — the server already issued this match's
   // seed at createMatch and never gave the client a way to propose one, so

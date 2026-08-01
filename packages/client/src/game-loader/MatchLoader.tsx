@@ -99,6 +99,13 @@ export default function MatchLoader({ createModule, gameTitle, gameId, onExit }:
       const matchInfo = phase.match
       mod.addEventListener('gameOver', ((e: Event) => {
         const payload = (e as CustomEvent<GameOverPayload>).detail
+        // TEMPORARY DIAGNOSTIC — mirrors the server-side log in matches.ts's
+        // submitScore. Remove both once the viewport/score-gap investigation
+        // is resolved.
+        console.log(
+          `[match] DIAGNOSTIC gameOver: matchId=${matchInfo.matchId} seed=${matchInfo.seed} ` +
+            `viewport=${payload.viewport.width}x${payload.viewport.height} score=${payload.score}`,
+        )
         submitScore({
           matchId: matchInfo.matchId,
           score: payload.score,
