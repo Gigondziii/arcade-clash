@@ -271,6 +271,14 @@ export class NeonRunnerModule extends EventTarget implements GameModule {
     this.engine.resize(w, h);
     this.lastResizeWidth = w;
     this.lastResizeHeight = h;
+    // TEMPORARY DIAGNOSTIC — session 21, Neon Runner baseline for the Sky
+    // Dodge ship-not-rendering investigation. Remove once that bug is
+    // confirmed fixed (see PROGRESS.md).
+    console.log(
+      `[neon-runner] DIAGNOSTIC resize: root=${this.root.clientWidth}x${this.root.clientHeight} ` +
+        `canvas=${this.canvas.width}x${this.canvas.height} clientWH=${w}x${h} dpr=${dpr} ` +
+        `engineWH=${this.engine.width}x${this.engine.height}`,
+    );
   };
 
   start(): void {

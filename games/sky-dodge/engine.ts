@@ -49,6 +49,10 @@ export class DodgeEngine {
 
   ended = false;
 
+  // TEMPORARY DIAGNOSTIC — session 21, ship-not-rendering investigation.
+  // Remove once the bug is confirmed fixed (see PROGRESS.md).
+  private frameCount = 0;
+
   private readonly seed: number;
 
   constructor(seed: number) {
@@ -190,6 +194,15 @@ export class DodgeEngine {
   draw(ctx: CanvasRenderingContext2D) {
     const { width, height } = this;
 
+    if (this.frameCount < 5) {
+      // TEMPORARY DIAGNOSTIC — session 21, ship-not-rendering investigation.
+      // Remove once the bug is confirmed fixed (see PROGRESS.md).
+      console.log(
+        `[sky-dodge] DIAGNOSTIC draw#${this.frameCount}: engineWH=${width}x${height} ` +
+          `playerX=${this.playerX} shipY=${this.shipY} shieldActive=${this.shieldActive}`,
+      );
+    }
+
     ctx.clearRect(0, 0, width, height);
     ctx.fillStyle = PALETTE.bg;
     ctx.fillRect(0, 0, width, height);
@@ -229,6 +242,17 @@ export class DodgeEngine {
       ctx.shadowBlur = 0;
     }
 
+    if (this.frameCount < 5) {
+      // TEMPORARY DIAGNOSTIC — session 21, ship-not-rendering investigation.
+      // Remove once the bug is confirmed fixed (see PROGRESS.md).
+      console.log(
+        `[sky-dodge] DIAGNOSTIC draw#${this.frameCount} ship path: ` +
+          `apex=(${this.playerX},${this.shipY - WORLD.shipHeight / 2}) ` +
+          `baseR=(${this.playerX + WORLD.shipWidth / 2},${this.shipY + WORLD.shipHeight / 2}) ` +
+          `baseL=(${this.playerX - WORLD.shipWidth / 2},${this.shipY + WORLD.shipHeight / 2}) ` +
+          `canvasBounds=0,0,${width},${height}`,
+      );
+    }
     ctx.beginPath();
     ctx.moveTo(this.playerX, this.shipY - WORLD.shipHeight / 2);
     ctx.lineTo(this.playerX + WORLD.shipWidth / 2, this.shipY + WORLD.shipHeight / 2);
@@ -239,5 +263,13 @@ export class DodgeEngine {
     ctx.shadowBlur = 16;
     ctx.fill();
     ctx.shadowBlur = 0;
+
+    if (this.frameCount < 5) {
+      // TEMPORARY DIAGNOSTIC — session 21, ship-not-rendering investigation.
+      console.log(
+        `[sky-dodge] DIAGNOSTIC draw#${this.frameCount} bottom: fillStyleAfter=${ctx.fillStyle} alpha=${ctx.globalAlpha}`,
+      );
+    }
+    this.frameCount++;
   }
 }

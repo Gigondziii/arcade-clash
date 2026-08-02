@@ -51,3 +51,9 @@ in `PROGRESS.md`.
   port.
 - Vite needs `server: { host: true }` in `vite.config.ts` for the dev
   server to be reachable via IPv4 on this machine (already set).
+- Before reporting any UI element or feature as missing/broken, run
+  netstat and confirm BOTH the client (5173) AND the Express server
+  are LISTENING. A dead backend presents as silently missing features
+  (no Find Opponent, cannot log in), not as an error message.
+  Third occurrence of an environment-state false alarm — see sessions
+  9, 12, and 20.

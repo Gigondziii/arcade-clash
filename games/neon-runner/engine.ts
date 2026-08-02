@@ -49,6 +49,11 @@ export class RunnerEngine {
 
   ended = false;
 
+  // TEMPORARY DIAGNOSTIC — session 21, Sky Dodge ship-not-rendering
+  // investigation. Neon Runner baseline for comparison. Remove once the
+  // Sky Dodge bug is confirmed fixed (see PROGRESS.md).
+  private frameCount = 0;
+
   private readonly seed: number;
 
   constructor(seed: number) {
@@ -207,6 +212,15 @@ export class RunnerEngine {
   draw(ctx: CanvasRenderingContext2D) {
     const { width, height, groundY } = this;
 
+    if (this.frameCount < 5) {
+      // TEMPORARY DIAGNOSTIC — session 21, Neon Runner baseline. Remove
+      // once the Sky Dodge bug is confirmed fixed (see PROGRESS.md).
+      console.log(
+        `[neon-runner] DIAGNOSTIC draw#${this.frameCount}: engineWH=${width}x${height} groundY=${groundY} ` +
+          `playerX=${this.playerX} playerY=${this.playerY}`,
+      );
+    }
+
     ctx.clearRect(0, 0, width, height);
     ctx.fillStyle = PALETTE.bg;
     ctx.fillRect(0, 0, width, height);
@@ -255,10 +269,25 @@ export class RunnerEngine {
 
     const playerBottom = groundY - this.playerY;
     const playerH = this.playerHeight;
+    if (this.frameCount < 5) {
+      // TEMPORARY DIAGNOSTIC — session 21, Neon Runner baseline. Remove
+      // once the Sky Dodge bug is confirmed fixed (see PROGRESS.md).
+      console.log(
+        `[neon-runner] DIAGNOSTIC draw#${this.frameCount} player rect: ` +
+          `x=${this.playerX - PLAYER.width / 2} y=${playerBottom - playerH} w=${PLAYER.width} h=${playerH} ` +
+          `canvasBounds=0,0,${width},${height}`,
+      );
+    }
     ctx.fillStyle = PALETTE.cyan;
     ctx.shadowColor = PALETTE.cyan;
     ctx.shadowBlur = 16;
     ctx.fillRect(this.playerX - PLAYER.width / 2, playerBottom - playerH, PLAYER.width, playerH);
     ctx.shadowBlur = 0;
+
+    if (this.frameCount < 5) {
+      // TEMPORARY DIAGNOSTIC — session 21, Neon Runner baseline.
+      console.log(`[neon-runner] DIAGNOSTIC draw#${this.frameCount} bottom: fillStyleAfter=${ctx.fillStyle}`);
+    }
+    this.frameCount++;
   }
 }

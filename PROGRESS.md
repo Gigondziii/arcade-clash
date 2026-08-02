@@ -7,6 +7,100 @@ conversations don't carry over, and work may resume from a different tool.
 played. Nobody has investigated yet — see the next section, and "STILL
 UNVERIFIED" further down, before doing anything else this session.**
 
+## Session 20b (2026-08-01): missing Find Opponent + login failure were a stopped backend, not bugs
+
+`netstat` showed only port 5173 (Vite/client) LISTENING — the Express
+server was never started this session, on any port. That alone explained
+both symptoms the user hit: login fails with no backend to answer the
+auth request, and "Find Opponent" disappears from every game card (not
+Sky-Dodge-specific) because `TrendingArena.tsx:50-52` only supplies
+`GameCard.tsx`'s `onFindOpponent` handler when `user` is truthy — no
+session, no button, exactly as written. Neither the auth code nor the
+Find Opponent conditional needed a change; both are correct as-is.
+Started via `npm run dev --workspace=@arcadeclash/server` (the root
+`package.json` has no scripts of its own — must target the workspace).
+Verified two ways: `netstat` showed a new LISTENING socket on `:4000`,
+and `GET /api/health` returned `200 {"ok":true}`. No zombie node process
+was blocking the port (checked via `Get-CimInstance Win32_Process`
+first, per CLAUDE.md's environment rules). Nothing touched except
+starting the process — no database, user row, or auth-flow change, per
+this session's explicit scope.
+
+**Sky Dodge's visual rendering bug (diagnosed session 20) is unrelated
+and remains open and unexplained** — practice mode is client-only and
+doesn't need this backend, so this session's fix doesn't touch it. See
+"NEXT SESSION: DIAGNOSE AND FIX SKY DODGE" below and "STILL UNVERIFIED"
+further down for the last known diagnostic state (frame-clear hypothesis
+falsified, no rendering test coverage exists anywhere in `scripts/`,
+root cause still unknown pending the user's own visual description).
+
+## Session 21 (2026-08-01): ship-not-rendering narrowed to a single
+## unconfirmed hypothesis; NOT fixed yet — diagnostic logging added instead
+
+User confirmed by photograph (practice mode): hazards, HUD, background,
+and score all render correctly; only the player ship (and by extension
+the shield ring) never appears. Narrowed the three static hypotheses:
+
+- **Invalid/undefined ship color — KILLED.** Every `PALETTE`/`WORLD` key
+  the ship and shield blocks reference (`PALETTE.cyan`, `PALETTE.lime`,
+  `WORLD.shipWidth`, `WORLD.shipHeight`) is defined in `constants.ts` and
+  resolves to a valid, distinct-from-background color. Confirmed both by
+  reading the source and by a headless runtime trace (below) that
+  recorded the literal call `fillStyle = "#2de2ff"` on the ship.
+- **NaN path coordinates from an undefined constant — KILLED.**
+  `playerX` is re-clamped to `[20, width-20]` every tick regardless of
+  input; `shipY` is a live getter off `this.height`, finite whenever
+  `height` is finite (always, once `resize()` has run — it sets `width`
+  and `height` together, unconditionally). No code path produces NaN.
+- **Ship drawn off-canvas because `height` didn't propagate — NOT
+  killed, but NOT confirmed either.** Built a recording fake
+  `CanvasRenderingContext2D` (a Proxy, no new dependency) and ran the
+  real `DodgeEngine.draw()` against it. With correct state
+  (`width=1280, height=664`) the ship's recorded draw calls are a
+  textbook-correct on-canvas triangle — `draw()` itself has no defect
+  given correct input. Forcing `height=0` while `width=1280` (the one
+  asymmetry that fits the reported symptom: hazard x-spread depends only
+  on `width`, `shipY = height - 60` depends only on `height`) reproduces
+  the exact symptom: ship path lands entirely above `y=0`
+  (`moveTo(640,-74)` etc.), hazards' x-spread stays fully correct. This
+  is the *only* mechanism found that produces this precise
+  ship-gone/hazards-fine/no-crash signature. **But** no code path was
+  found that would actually decouple `height` from `width` — `resize()`
+  always sets both from one synchronous measurement — and it's
+  contradicted by session 20's own live measurement (`canvas.height=664`
+  immediately after mount in this sandbox, same code path). Favored as
+  the most likely remaining candidate, held with low-to-moderate
+  confidence, not proven.
+- Collision position and draw position are **the same underlying
+  state** (`this.playerX` field, `this.shipY` getter) — not computed
+  separately. If the off-canvas hypothesis is eventually confirmed, it
+  would equally affect collision (hazards would rarely if ever reach a
+  `y≈-60` ship, since they spawn around `y≈-30` and only move toward
+  positive `y`) — a testable prediction: ask whether Sky Dodge runs are
+  ever actually observed ending by collision, or only by manual Quit.
+
+**Not fixed.** Since static/headless tracing couldn't settle the
+remaining hypothesis, added `TEMPORARY DIAGNOSTIC` `console.log` calls
+(session 21 marker, same convention as session 18's) to both
+`games/sky-dodge/{index,engine}.ts` and, as a working-baseline
+comparison in the same console session, `games/neon-runner/{index,engine}.ts`
+— logs resize-time canvas/engine dimensions and the first 5 frames'
+exact ship-path coordinates. **Not yet removed** — waiting on the user
+running Sky Dodge practice mode with DevTools open and pasting back the
+`[sky-dodge]`/`[neon-runner]` console lines. Verified this addition is
+inert: `scripts/determinism-check.ts` 17/17, `scripts/
+score-validation-check.ts` 24/24, `scripts/matchmaking-check.ts` 27/27,
+all unchanged (the new fields only mutate inside `draw()`, which no
+script calls — confirmed via `grep -rni draw scripts/`, only hit is the
+unrelated word "draw" meaning a tied match). `tsc --noEmit` (games)
+clean, `tsc -b` (client) clean, `oxlint` clean on both changed game
+directories.
+
+**This is not a confirmed fix and must not be treated as one — the ship
+rendering has not been observed working by anyone, in this sandbox or
+otherwise.** Only the user actually seeing a ship on screen (or the
+diagnostic console output ruling hypotheses in or out) closes this out.
+
 ## NEXT SESSION: DIAGNOSE AND FIX SKY DODGE — diagnose first, don't guess
 
 This section is written for zero prior context — read it alone and you have

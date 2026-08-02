@@ -276,6 +276,13 @@ export class SkyDodgeModule extends EventTarget implements GameModule {
     this.engine.resize(w, h);
     this.lastResizeWidth = w;
     this.lastResizeHeight = h;
+    // TEMPORARY DIAGNOSTIC — session 21, ship-not-rendering investigation.
+    // Remove once the bug is confirmed fixed (see PROGRESS.md).
+    console.log(
+      `[sky-dodge] DIAGNOSTIC resize: root=${this.root.clientWidth}x${this.root.clientHeight} ` +
+        `canvas=${this.canvas.width}x${this.canvas.height} clientWH=${w}x${h} dpr=${dpr} ` +
+        `engineWH=${this.engine.width}x${this.engine.height}`,
+    );
   };
 
   start(): void {
