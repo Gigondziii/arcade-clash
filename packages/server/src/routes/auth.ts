@@ -7,11 +7,13 @@ import { SESSION_COOKIE_MAX_AGE_MS, SESSION_COOKIE_NAME, signSessionToken } from
 import { attachSession, requireAuth } from "../auth/middleware";
 import { db } from "../db/client";
 import { users, type User } from "../db/schema";
+import { ensureSignupGrant } from "../wallet/ledger";
 
 const USERNAME_PATTERN = /^[a-zA-Z0-9_]{3,20}$/;
 const MIN_PASSWORD_LENGTH = 8;
 
-function toPublicUser(user: User): PublicUser {
+async function toPublicUser(user: User): Promise<PublicUser> {
+  const balances = await ensureSignupGrant(user.id);
   return {
     id: user.id,
     username: user.username,
@@ -20,6 +22,7 @@ function toPublicUser(user: User): PublicUser {
     gamesPlayed: user.gamesPlayed,
     gamesWon: user.gamesWon,
     createdAt: user.createdAt.toISOString(),
+    balances,
   };
 }
 
@@ -65,7 +68,8 @@ authRouter.post("/signup", async (req, res) => {
     .returning();
 
   setSessionCookie(res, user.id);
-  res.status(201).json({ user: toPublicUser(user) });
+  // ensureSignupGrant inside toPublicUser writes the +10 COINS ledger row.
+  res.status(201).json({ user: await toPublicUser(user) });
 });
 
 authRouter.post("/login", async (req, res) => {
@@ -84,7 +88,7 @@ authRouter.post("/login", async (req, res) => {
   }
 
   setSessionCookie(res, user.id);
-  res.json({ user: toPublicUser(user) });
+  res.json({ user: await toPublicUser(user) });
 });
 
 authRouter.post("/logout", (_req, res) => {
@@ -98,5 +102,5 @@ authRouter.get("/me", attachSession, requireAuth, async (req, res) => {
     res.status(401).json({ error: "Not authenticated" });
     return;
   }
-  res.json({ user: toPublicUser(user) });
+  res.json({ user: await toPublicUser(user) });
 });

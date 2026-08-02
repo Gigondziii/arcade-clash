@@ -8,9 +8,10 @@ import { BellIcon, SearchIcon } from './icons'
 type NavbarProps = {
   onNavigateHome: () => void
   onNavigateProfile: () => void
+  onNavigateFriends?: () => void
 }
 
-export default function Navbar({ onNavigateHome, onNavigateProfile }: NavbarProps) {
+export default function Navbar({ onNavigateHome, onNavigateProfile, onNavigateFriends }: NavbarProps) {
   const { user, logOut } = useAuth()
   const [activeFilter, setActiveFilter] = useState('hot')
   const [menuOpen, setMenuOpen] = useState(false)
@@ -62,6 +63,25 @@ export default function Navbar({ onNavigateHome, onNavigateProfile }: NavbarProp
       </div>
 
       <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-4)', marginLeft: 'auto' }}>
+        {user && (
+          <div
+            style={{
+              display: 'flex',
+              gap: 'var(--space-3)',
+              fontSize: 'var(--font-size-sm)',
+              color: 'var(--color-text-muted)',
+            }}
+            title="Coins are free play money. Diamonds are premium."
+          >
+            <span>
+              <span style={{ color: 'var(--color-secondary, #fbbf24)' }}>{user.balances.coins}</span> coins
+            </span>
+            <span>
+              <span style={{ color: 'var(--color-primary)' }}>{user.balances.diamonds}</span> diamonds
+            </span>
+          </div>
+        )}
+
         <button
           type="button"
           aria-label="Notifications"
@@ -107,6 +127,15 @@ export default function Navbar({ onNavigateHome, onNavigateProfile }: NavbarProp
                     onNavigateProfile()
                   }}
                 />
+                {onNavigateFriends && (
+                  <MenuItem
+                    label="Friends"
+                    onClick={() => {
+                      setMenuOpen(false)
+                      onNavigateFriends()
+                    }}
+                  />
+                )}
                 <MenuItem
                   label="Log out"
                   onClick={() => {

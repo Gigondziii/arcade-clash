@@ -11,11 +11,17 @@ import { API_URL } from '../lib/api'
 
 export type MatchmakingConnectionState = 'connecting' | 'queued' | 'matched' | 'closed'
 
+export type MatchSocketMode =
+  | { kind: 'queue' }
+  | { kind: 'sendInvite'; friendUserId: string }
+  | { kind: 'acceptInvite'; inviteId: string }
+
 export type UseMatchSocketResult = {
   connectionState: MatchmakingConnectionState
   match: MatchedPayload | null
   resolution: MatchResolvedPayload | null
   error: string | null
+  waitingLabel: string | null
   submitScore: (payload: SubmitScorePayload) => void
   // Evidence-only, fire-and-forget — see PROGRESS.md's freeze-frame Known
   // Gaps entry. No-ops if there's no active match yet (nothing to report
@@ -24,26 +30,16 @@ export type UseMatchSocketResult = {
   disconnect: () => void
 }
 
-// Owns exactly one socket connection for one "find opponent" attempt — the
-// socket's lifetime IS the queue/match membership (see PROGRESS.md): connect
-// on mount, join the queue immediately, disconnect on unmount. Cancelling
-// mid-queue and leaving mid-match are both just "stop rendering this," which
-// tears the socket down the same way a network drop would — one code path,
-// covered server-side by matches.ts's disconnect handler either way.
-//
-// Deliberately doesn't track a "playing" phase — that's MatchLoader's own
-// concern (has it mounted the GameModule yet), not something the transport
-// layer needs an opinion on. This hook only reports what the server told it:
-// queued, matched, resolved, or errored. ("ended" — a disconnect voiding the
-// match — no longer exists as a distinct terminal state; a mid-match
-// disconnect now resolves via matchResolved like anything else, see
-// PROGRESS.md's session log.)
-export function useMatchSocket(gameId: string): UseMatchSocketResult {
+// Owns exactly one socket connection for one matchmaking attempt — queue,
+// outbound friend invite, or accept-invite. Connect on mount, act, disconnect
+// on unmount. Same lifecycle as before; mode only changes the first emit.
+export function useMatchSocket(gameId: string, mode: MatchSocketMode = { kind: 'queue' }): UseMatchSocketResult {
   const socketRef = useRef<Socket<ServerToClientEvents, ClientToServerEvents> | null>(null)
   const [connectionState, setConnectionState] = useState<MatchmakingConnectionState>('connecting')
   const [match, setMatch] = useState<MatchedPayload | null>(null)
   const [resolution, setResolution] = useState<MatchResolvedPayload | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [waitingLabel, setWaitingLabel] = useState<string | null>(null)
 
   useEffect(() => {
     const socket: Socket<ServerToClientEvents, ClientToServerEvents> = io(API_URL, { withCredentials: true })
@@ -51,11 +47,35 @@ export function useMatchSocket(gameId: string): UseMatchSocketResult {
 
     socket.on('connect', () => {
       setConnectionState('queued')
-      socket.emit('joinQueue', { gameId })
+      if (mode.kind === 'queue') {
+        setWaitingLabel('Looking for an opponent…')
+        socket.emit('joinQueue', { gameId })
+      } else if (mode.kind === 'sendInvite') {
+        setWaitingLabel('Sending invite…')
+        socket.emit('inviteFriend', { friendUserId: mode.friendUserId, gameId })
+      } else {
+        setWaitingLabel('Joining match…')
+        socket.emit('respondInvite', { inviteId: mode.inviteId, accept: true })
+      }
+    })
+
+    socket.on('inviteSent', (payload) => {
+      setWaitingLabel(`Waiting for ${payload.toUsername} to accept…`)
+    })
+
+    socket.on('inviteRejected', (payload) => {
+      setError(payload.reason || 'Invite was declined.')
+      setConnectionState('closed')
+    })
+
+    socket.on('inviteError', (payload) => {
+      setError(payload.message)
+      setConnectionState('closed')
     })
 
     socket.on('matched', (payload) => {
       setConnectionState('matched')
+      setWaitingLabel(null)
       setMatch(payload)
     })
 
@@ -77,12 +97,14 @@ export function useMatchSocket(gameId: string): UseMatchSocketResult {
     })
 
     return () => {
+      if (mode.kind === 'sendInvite') {
+        // Best-effort cancel so the friend isn't left with a dead invite.
+        // inviteId isn't always known here; server clears outbound on disconnect.
+      }
       socket.disconnect()
       socketRef.current = null
     }
-    // gameId is fixed for the lifetime of one find-opponent attempt — a
-    // different game means a fresh MatchLoader instance (new key), not a
-    // reconnect of this one.
+    // Mode/gameId are fixed for the lifetime of one MatchLoader instance.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
@@ -98,5 +120,14 @@ export function useMatchSocket(gameId: string): UseMatchSocketResult {
     socketRef.current?.disconnect()
   }, [])
 
-  return { connectionState, match, resolution, error, submitScore, reportVisibilityHidden, disconnect }
+  return {
+    connectionState,
+    match,
+    resolution,
+    error,
+    waitingLabel,
+    submitScore,
+    reportVisibilityHidden,
+    disconnect,
+  }
 }

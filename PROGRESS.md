@@ -7,6 +7,50 @@ conversations don't carry over, and work may resume from a different tool.
 played. Nobody has investigated yet — see the next section, and "STILL
 UNVERIFIED" further down, before doing anything else this session.**
 
+## Session 22 (2026-08-02): dual-currency wallet + friends + invite-to-play
+
+User asked for Fmoney/coins + diamonds and a friend invite-to-play system.
+Sky Dodge ship bug remains open (diagnostic logs still in place from
+session 21); this session deliberately did the requested systems work.
+
+**BUILT (verified how noted):**
+
+1. **Append-only wallet ledger** — `ledger_entries` table +
+   `packages/server/src/wallet/ledger.ts`. Currencies: `COINS` (free
+   Fmoney) and `DIAMONDS`. Balances derived via SUM, never a mutable
+   balance column. Migration `0001_wallet_friends.sql` applied
+   successfully via `drizzle-kit migrate`.
+2. **Signup / login grant** — `ensureSignupGrant` writes +10 COINS once
+   (`reason=signup_grant`), diamonds stay 0. Idempotent on `/me` and
+   login so pre-wallet accounts get the same one-time grant (not every
+   login). Live smoke: signup returned
+   `balances: { coins: 10, diamonds: 0 }`.
+3. **Stub diamond shop** — `DIAMOND_PACKS` in shared (`$2 → 10`, etc.).
+   `POST /api/wallet/purchase-diamonds` grants immediately with
+   `stub: true` — no Stripe. Live smoke: pack_10 → diamonds 10.
+4. **Friends REST** — `friendships` table;
+   `GET/POST /api/friends`, accept/reject. Live smoke: `{"friends":[]}`.
+5. **Invite-to-play** — socket events `inviteFriend` / `respondInvite` /
+   `inviteReceived` / etc. Private match reuses `createMatch` (same
+   async seeded flow as random queue). Presence map for online friends.
+   Client: Friends page, InviteProvider toast, MatchLoader modes
+   `queue` | `sendInvite` | `acceptInvite`. Navbar shows coin/diamond
+   balances; Profile has shop + balances disclaimer.
+
+**Defaults chosen (user didn't answer clarifying questions):** grant once
+on signup (not every login); stub shop not Stripe; full friends+invite
+MVP.
+
+**Tests this session:** `determinism-check` 17/17, `score-validation-check`
+24/24, `matchmaking-check` 27/27, `wallet-friends-check` 5/5 (new).
+`tsc` clean for client + server. Invite two-player live UI play not
+verified in this sandbox (same Browser-pane rAF limitation as prior
+matchmaking notes).
+
+**Still PLANNED:** real Stripe payments, stakes/escrow, spending coins on
+matches, per-game live player counts. Points/coins reset-at-real-money
+launch disclaimer is now on Profile.
+
 ## Session 20b (2026-08-01): missing Find Opponent + login failure were a stopped backend, not bugs
 
 `netstat` showed only port 5173 (Vite/client) LISTENING — the Express
@@ -1372,8 +1416,9 @@ needed, not just one — invites matter more at small scale specifically,
 since two friends who both want to play each other shouldn't have to be
 queued at the same moment to get matched (random pairing, as built
 session 15, doesn't cover this — it only pairs whoever happens to be
-queued for the same game at the same time). Invites are PLANNED, not
-built — see ROADMAP item 4.
+queued for the same game at the same time). **Friend invites are BUILT
+as of session 22** (socket invite → private `createMatch`); random queue
+remains for strangers. Per-game live player counts still PLANNED.
 
 **Game plan — PLANNED, revises the earlier "51 games" target described
 elsewhere in this file** (see e.g. "Games: 3 built" in Architecture
@@ -1393,25 +1438,23 @@ reskin, even though session 13-14's notes flagged a second `runner` game
 as the natural test of the shared-engine-cluster model. Ask before
 assuming which takes priority if this ever matters.)
 
-**Money representation (the "BUILT-BY" rule) — PLANNED, applies once the
-wallet is built; nothing below exists in code yet.** These are
-invariants the wallet implementation MUST satisfy from its first
-commit, not retrofit later:
-- All balances stored as INTEGERS in minor units, never floats.
-- Every ledger row carries a `currency` field, set to `POINTS` for now —
-  adding a real currency (e.g. GEL) later is a new value in that column,
-  not a schema migration.
+**Money representation — BUILT (session 22) for COINS + DIAMONDS ledger;
+stakes/escrow/rake/Stripe still PLANNED.** Invariants now in code:
+- All balances stored as INTEGERS in minor units, never floats. *(verified:
+  `ledger_entries.amount` is integer)*
+- Every ledger row carries a `currency` field — values `COINS` and
+  `DIAMONDS` (was planned as `POINTS`; user asked for free Fmoney +
+  premium diamonds). Adding another currency is a new value, not a
+  schema migration.
 - Balances are DERIVED from an append-only ledger, never stored as an
-  independently-mutable field. If a cached/denormalized balance exists
-  for read performance, a reconciliation job must recompute it from the
-  ledger and alert on mismatch — the cache is never the source of truth.
+  independently-mutable field.
 - The rake is a ledger entry to a house account, not money disappearing
-  from the system.
+  from the system. *(still PLANNED — no rake path yet)*
 - System invariant: the sum of all balances is constant except at an
-  explicit grant/deposit event. Any code path that can change that sum
-  without one is a bug.
-- **Points reset at real-money launch, and this must be stated in the UI
-  before anyone accumulates a points balance** — no user should be
+  explicit grant/deposit event. *(signup_grant + stub diamond purchase
+  are the current grant events)*
+- **Coins reset at real-money launch, and this must be stated in the UI
+  before anyone accumulates a coin balance** — no user should be
   surprised later that their points didn't carry over.
 
 **Visual theme (as of session 2, replaces the original neon-rainbow theme):**
@@ -1469,7 +1512,8 @@ needs client-side.
 of session 8 — see above):**
 - ~~Auth & user profiles~~ **done, session 8** — see the session log below
 - Matchmaking (practice/for-fun/for-stakes queue) — still not started
-- Wallet / stakes / escrow system — still not started
+- Wallet ledger (COINS + DIAMONDS) + friends + invites — BUILT session 22;
+  stakes / escrow / Stripe still not started
 - Leaderboards — still not started
 - Real-time opponent sync (WebSocket match state, etc.) — still not started
 

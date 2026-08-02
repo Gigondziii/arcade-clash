@@ -1,7 +1,14 @@
 import type { Server as HttpServer } from "node:http";
 import type { ClientToServerEvents, ServerToClientEvents } from "@arcadeclash/shared";
 import { Server, type DefaultEventsMap } from "socket.io";
+import {
+  cancelInvitesForSocket,
+  handleCancelInvite,
+  handleInviteFriend,
+  handleRespondInvite,
+} from "./invites";
 import { createMatch, handleDisconnect, isSocketInMatch, submitScore } from "./matches";
+import { registerPresence, unregisterPresence } from "./presence";
 import { enqueue, generateSeed, isValidGameId, tryPair } from "./queue";
 import { socketAuthMiddleware, type MatchmakingSocket, type MatchmakingSocketData } from "./socketAuth";
 
@@ -18,6 +25,8 @@ export function attachMatchmaking(httpServer: HttpServer, opts: { clientOrigin: 
   io.use(socketAuthMiddleware);
 
   io.on("connection", (socket: MatchmakingSocket) => {
+    registerPresence(socket);
+
     socket.on("joinQueue", (payload) => {
       if (!payload || typeof payload.gameId !== "string" || !isValidGameId(payload.gameId)) {
         socket.emit("queueError", { message: "Unknown game." });
@@ -30,6 +39,18 @@ export function attachMatchmaking(httpServer: HttpServer, opts: { clientOrigin: 
         const [a, b] = pair;
         createMatch(payload.gameId, a, b, generateSeed());
       }
+    });
+
+    socket.on("inviteFriend", (payload) => {
+      void handleInviteFriend(socket, payload);
+    });
+
+    socket.on("respondInvite", (payload) => {
+      handleRespondInvite(socket, payload);
+    });
+
+    socket.on("cancelInvite", (payload) => {
+      handleCancelInvite(socket, payload);
     });
 
     socket.on("submitScore", (payload) => {
@@ -46,6 +67,8 @@ export function attachMatchmaking(httpServer: HttpServer, opts: { clientOrigin: 
     });
 
     socket.on("disconnect", () => {
+      cancelInvitesForSocket(socket);
+      unregisterPresence(socket);
       handleDisconnect(socket);
     });
   });

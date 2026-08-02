@@ -94,14 +94,51 @@ export type QueueErrorPayload = {
   message: string;
 };
 
+// Direct friend invite — private match using the same async seeded flow as
+// random queue pairing. Invite state is in-memory only (same as the queue).
+export type InviteFriendPayload = {
+  friendUserId: string;
+  gameId: string;
+};
+
+export type RespondInvitePayload = {
+  inviteId: string;
+  accept: boolean;
+};
+
+export type InviteReceivedPayload = {
+  inviteId: string;
+  fromUserId: string;
+  fromUsername: string;
+  gameId: string;
+};
+
+export type InviteRejectedPayload = {
+  inviteId: string;
+  reason: string;
+};
+
+export type InviteErrorPayload = {
+  message: string;
+};
+
 export interface ClientToServerEvents {
   joinQueue: (payload: JoinQueuePayload) => void;
   submitScore: (payload: SubmitScorePayload) => void;
   visibilityHidden: (payload: VisibilityHiddenPayload) => void;
+  inviteFriend: (payload: InviteFriendPayload) => void;
+  respondInvite: (payload: RespondInvitePayload) => void;
+  // Cancel a pending invite you sent (or leave the "waiting for accept" screen).
+  cancelInvite: (payload: { inviteId: string }) => void;
 }
 
 export interface ServerToClientEvents {
   matched: (payload: MatchedPayload) => void;
   matchResolved: (payload: MatchResolvedPayload) => void;
   queueError: (payload: QueueErrorPayload) => void;
+  inviteReceived: (payload: InviteReceivedPayload) => void;
+  inviteRejected: (payload: InviteRejectedPayload) => void;
+  inviteError: (payload: InviteErrorPayload) => void;
+  // Echoed to the inviter so the waiting UI knows which inviteId to cancel.
+  inviteSent: (payload: { inviteId: string; gameId: string; toUsername: string }) => void;
 }

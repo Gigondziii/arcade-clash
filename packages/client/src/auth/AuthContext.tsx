@@ -9,6 +9,7 @@ type AuthContextValue = {
   signUp: (username: string, password: string, email?: string) => Promise<void>
   logIn: (username: string, password: string) => Promise<void>
   logOut: () => Promise<void>
+  refreshUser: () => Promise<void>
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null)
@@ -58,8 +59,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUser(null)
   }
 
+  async function refreshUser() {
+    try {
+      const res = await apiFetch<{ user: PublicUser }>('/api/auth/me')
+      setUser(res.user)
+    } catch {
+      setUser(null)
+    }
+  }
+
   return (
-    <AuthContext.Provider value={{ user, loading, error, signUp, logIn, logOut }}>{children}</AuthContext.Provider>
+    <AuthContext.Provider value={{ user, loading, error, signUp, logIn, logOut, refreshUser }}>
+      {children}
+    </AuthContext.Provider>
   )
 }
 

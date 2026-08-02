@@ -5,6 +5,8 @@ import cors from "cors";
 import express, { type ErrorRequestHandler } from "express";
 import { attachMatchmaking } from "./matchmaking";
 import { authRouter } from "./routes/auth";
+import { friendsRouter } from "./routes/friends";
+import { walletRouter } from "./routes/wallet";
 
 const app = express();
 
@@ -14,6 +16,8 @@ app.use(cookieParser());
 app.use(express.json());
 
 app.use("/api/auth", authRouter);
+app.use("/api/wallet", walletRouter);
+app.use("/api/friends", friendsRouter);
 
 app.get("/api/health", (_req, res) => {
   res.json({ ok: true });

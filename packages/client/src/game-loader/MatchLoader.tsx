@@ -7,13 +7,14 @@ import type {
   MatchResolvedPayload,
   PlayerResult,
 } from '@arcadeclash/shared'
-import { useMatchSocket } from '../matchmaking/useMatchSocket'
+import { useMatchSocket, type MatchSocketMode } from '../matchmaking/useMatchSocket'
 
 type MatchLoaderProps = {
   createModule: GameModuleFactory
   gameTitle: string
   gameId: string
   onExit: () => void
+  matchMode?: MatchSocketMode
 }
 
 // A separate host from GameLoader (practice mode) rather than a mode branch
@@ -44,9 +45,15 @@ function isTerminal(phase: Phase): boolean {
   return phase.kind === 'resolved' || phase.kind === 'connection-error'
 }
 
-export default function MatchLoader({ createModule, gameTitle, gameId, onExit }: MatchLoaderProps) {
-  const { connectionState, match, resolution, error, submitScore, reportVisibilityHidden, disconnect } =
-    useMatchSocket(gameId)
+export default function MatchLoader({
+  createModule,
+  gameTitle,
+  gameId,
+  onExit,
+  matchMode = { kind: 'queue' },
+}: MatchLoaderProps) {
+  const { connectionState, match, resolution, error, waitingLabel, submitScore, reportVisibilityHidden, disconnect } =
+    useMatchSocket(gameId, matchMode)
   const [phase, setPhase] = useState<Phase>({ kind: 'queued' })
   const containerRef = useRef<HTMLDivElement | null>(null)
   const moduleRef = useRef<GameModule | null>(null)
@@ -181,7 +188,7 @@ export default function MatchLoader({ createModule, gameTitle, gameId, onExit }:
         }}
       >
         <span className="ac-text-muted" style={{ fontSize: 'var(--font-size-sm)' }}>
-          {gameTitle} · Find Opponent
+          {gameTitle} · {matchMode.kind === 'queue' ? 'Find Opponent' : 'Friend Match'}
         </span>
         <button
           type="button"
@@ -199,9 +206,14 @@ export default function MatchLoader({ createModule, gameTitle, gameId, onExit }:
         {phase.kind === 'queued' && (
           <Overlay>
             <div className="ac-panel" style={{ textAlign: 'center', minWidth: 280 }}>
-              <h2 style={{ margin: '0 0 var(--space-2)' }}>Finding an opponent...</h2>
+              <h2 style={{ margin: '0 0 var(--space-2)' }}>
+                {matchMode.kind === 'queue' ? 'Finding an opponent...' : 'Friend invite'}
+              </h2>
               <p className="ac-text-muted" style={{ margin: '0 0 var(--space-5)' }}>
-                Waiting for another {gameTitle} player
+                {waitingLabel ??
+                  (matchMode.kind === 'queue'
+                    ? `Waiting for another ${gameTitle} player`
+                    : 'Setting up your match…')}
               </p>
               <button type="button" className="ac-btn ac-btn--ghost" onClick={handleLeave}>
                 Cancel
