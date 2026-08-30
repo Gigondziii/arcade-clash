@@ -1,0 +1,62 @@
+{
+  "version": "7",
+  "dialect": "postgresql",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "7",
+      "when": 1785399986181,
+      "tag": "0000_early_marrow",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1785650000000,
+      "tag": "0001_wallet_friends",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1786500000000,
+      "tag": "0002_ledger_idempotency_unique",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1787000000000,
+      "tag": "0003_matches_history",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1787500000000,
+      "tag": "0004_atomic_wager_lifecycle",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1788000000000,
+      "tag": "0005_reconcile_schema_parity",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1788500000000,
+      "tag": "0006_password_reset_tokens",
+      "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1789000000000,
+      "tag": "0007_policy_acceptances",
+      "breakpoints": true
+    }
+  ]
+}

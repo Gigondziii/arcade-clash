@@ -1,0 +1,15 @@
+# Logs
+logs
+*.log
+npm-debug.log*
+
+# Node modules & build outputs
+node_modules
+dist
+.drizzle
+
+# Environment variables
+.env
+.env.local
+.env.*
+!.env.example

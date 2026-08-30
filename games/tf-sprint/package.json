@@ -1,0 +1,13 @@
+{
+  "name": "@fugluck/game-tf-sprint",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "main": "./index.ts",
+  "exports": {
+    ".": "./index.ts"
+  },
+  "dependencies": {
+    "@fugluck/shared": "workspace:*"
+  }
+}

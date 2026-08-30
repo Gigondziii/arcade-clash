@@ -1,0 +1,21 @@
+{
+  "name": "fugluck",
+  "version": "0.0.1",
+  "private": true,
+  "scripts": {
+    "build": "npm --workspace=@fugluck/client run build",
+    "build:client": "npm --workspace=@fugluck/client run build",
+    "build:server": "npx tsc --project packages/server/tsconfig.json --noEmit",
+    "start:server": "npm --workspace=@fugluck/server run start",
+    "db:migrate": "npm --workspace=@fugluck/server run db:migrate",
+    "typecheck": "npx tsc --project packages/shared/tsconfig.json --noEmit && npx tsc --project packages/theme/tsconfig.json --noEmit && npx tsc --project games/tsconfig.json --noEmit && npx tsc --project packages/server/tsconfig.json --noEmit && npm --workspace=@fugluck/client run build",
+    "test:database-safety": "tsx scripts/test-database-safety-check.ts",
+    "test:migration-parity": "tsx scripts/migration-schema-parity-check.ts",
+    "test:atomic-wager": "tsx scripts/atomic-wager-lifecycle-check.ts",
+    "test": "npx tsx scripts/migration-schema-parity-check.ts && npx tsx scripts/auth-account-lifecycle-check.ts && npx tsx scripts/legal-policy-help-check.ts && npx tsx scripts/i18n-check.ts && npx tsx scripts/wallet-friends-check.ts && npx tsx scripts/financial-reconnection-check.ts && npx tsx scripts/matchmaking-check.ts && npx tsx scripts/determinism-check.ts && npx tsx scripts/score-validation-check.ts && npx tsx scripts/canvas-render-check.ts && npx tsx scripts/rate-limit-check.ts && npx tsx scripts/sql-injection-check.ts && npx tsx scripts/input-validation-check.ts && npx tsx scripts/xss-audit-check.ts && npx tsx scripts/password-security-check.ts && npx tsx scripts/admin-security-check.ts && npx tsx scripts/admin-console-check.ts && npx tsx scripts/admin-reset-recovery-check.ts && npx tsx scripts/seed-admin-check.ts && npx tsx scripts/cors-audit-check.ts && npx tsx scripts/registration-verification-check.ts && npx tsx scripts/owner-admin-lockout-check.ts && npx tsx scripts/request-logging-audit-check.ts && npx tsx scripts/password-policy-check.ts && npx tsx scripts/file-upload-audit-check.ts && npx tsx scripts/wallet-settlement-concurrency-check.ts && npx tsx scripts/wallet-settlement-integrity-check.ts && npx tsx scripts/match-lifecycle-durability-check.ts && npx tsx scripts/staging-readiness-check.ts"
+  },
+  "workspaces": [
+    "packages/*",
+    "games"
+  ]
+}

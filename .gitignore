@@ -1,0 +1,134 @@
+# =============================================================================
+# ArcadeClash Monorepo Root .gitignore
+# Supports Node.js/TypeScript Web & Backend Workspaces + Unity Game Engine
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# Node.js & Monorepo Dependencies
+# -----------------------------------------------------------------------------
+node_modules/
+.pnp
+.pnp.js
+.npm/
+.yarn/
+*.tsbuildinfo
+
+# -----------------------------------------------------------------------------
+# Web & Backend Build Outputs
+# -----------------------------------------------------------------------------
+dist/
+dist-ssr/
+build/
+out/
+.drizzle/
+*.bundle.js
+*.bundle.js.map
+
+# -----------------------------------------------------------------------------
+# Test Coverage & Diagnostics
+# -----------------------------------------------------------------------------
+coverage/
+.nyc_output/
+*.lcov
+
+# -----------------------------------------------------------------------------
+# Environment & Secrets (Never commit credentials)
+# -----------------------------------------------------------------------------
+.env
+.env.local
+.env.development
+.env.development.local
+.env.test
+.env.test.local
+.env.production
+.env.production.local
+.env.*.local
+*.pem
+*.key
+*.p12
+*.pfx
+*.pkcs12
+id_rsa
+id_ecdsa
+id_ed25519
+
+# Preserve explicit environment template examples
+!.env.example
+!packages/client/.env.example
+!packages/server/.env.example
+
+# -----------------------------------------------------------------------------
+# Logs & Process Monitoring
+# -----------------------------------------------------------------------------
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# -----------------------------------------------------------------------------
+# Editor & OS Metadata
+# -----------------------------------------------------------------------------
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+[Dd]esktop.ini
+$RECYCLE.BIN/
+
+# IDE configurations (VSCode / JetBrains / Visual Studio)
+.vscode/*
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+!.vscode/extensions.json
+.idea/
+*.sublime-project
+*.sublime-workspace
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# -----------------------------------------------------------------------------
+# Unity Game Engine Generated & Cache Directories
+# (Preserves Assets/, Packages/, ProjectSettings/, and all *.meta files)
+# -----------------------------------------------------------------------------
+[Ll]ibrary/
+[Tt]emp/
+[Oo]bj/
+[Bb]uild/
+[Bb]uilds/
+[Ll]ogs/
+[Uu]ser[Ss]ettings/
+[Mm]emoryCaptures/
+[Aa]rchive/
+
+# Unity generated project files & Visual Studio / Rider caches
+[Aa]ssets/Plugins/Editor/JetBrains*
+ExportedObj/
+.consulo/
+*.csproj
+*.unityproj
+*.sln.DotSettings*
+.vs/
+
+# Unity Auto-Generated Crash Reports & Profiler Dumps
+sysinfo.txt
+*.stackdump
+
+# Builds
+*.apk
+*.aab
+*.unitypackage
+*.app
+*.exe
+
+# Fastlane / Gradle temporary files
+.gradle/

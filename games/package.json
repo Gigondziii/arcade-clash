@@ -1,0 +1,48 @@
+{
+  "name": "@fugluck/games",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "main": "./registry.ts",
+  "exports": {
+    ".": {
+      "import": "./registry.ts",
+      "default": "./registry.ts"
+    },
+    "./replayAdapters": {
+      "import": "./replayAdapters.ts",
+      "default": "./replayAdapters.ts"
+    },
+    "./neon-runner": {
+      "import": "./neon-runner/index.ts",
+      "default": "./neon-runner/index.ts"
+    },
+    "./pixel-ninja-dash": {
+      "import": "./pixel-ninja-dash/index.ts",
+      "default": "./pixel-ninja-dash/index.ts"
+    },
+    "./sky-dodge": {
+      "import": "./sky-dodge/index.ts",
+      "default": "./sky-dodge/index.ts"
+    },
+    "./space-blaster": {
+      "import": "./space-blaster/index.ts",
+      "default": "./space-blaster/index.ts"
+    },
+    "./cyber-hopper": {
+      "import": "./cyber-hopper/index.ts",
+      "default": "./cyber-hopper/index.ts"
+    },
+    "./speed-trivia": {
+      "import": "./speed-trivia/index.ts",
+      "default": "./speed-trivia/index.ts"
+    },
+    "./tf-sprint": {
+      "import": "./tf-sprint/index.ts",
+      "default": "./tf-sprint/index.ts"
+    }
+  },
+  "dependencies": {
+    "@fugluck/shared": "*"
+  }
+}
